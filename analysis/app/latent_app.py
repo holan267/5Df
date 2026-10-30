@@ -18,6 +18,7 @@ per file and size, decoded cubes, grain packs and noise planes, halation maps.
 Film descriptions (latent_traits.py) are measured in the background at start-up
 and kept in a JSON file in the system temp folder until a pack changes.
 The server only needs the standard library on top of the CLI's dependencies.
+The same page also runs without Python, entirely in the browser: see web/README.md.
 
 AUTOEXEC.BIN and LATENT/ hold Latent Studios' key and film packs: keep the
 server on localhost or behind your own access control, do not host it publicly.
@@ -98,7 +99,7 @@ def _arg(q, name, conv, default):
 
 
 class Studio:
-    def __init__(self, autoexec, latent_dir, folder, upload_dir):
+    def __init__(self, autoexec, latent_dir, folder, upload_dir, background_traits=True):
         self.autoexec, self.latent_dir = autoexec, latent_dir
         self.folder, self.upload_dir = folder, upload_dir
         self.key = latent_crypt.load_key(autoexec)
@@ -122,7 +123,8 @@ class Studio:
         self.ticket_lock = threading.Lock()
         self.latest_preview = 0
         self.traits, self.traits_error = None, None
-        threading.Thread(target=self.measure_traits, daemon=True).start()
+        if background_traits:   # the browser build (web/) has no threads and measures in its own worker
+            threading.Thread(target=self.measure_traits, daemon=True).start()
 
     # ------------------------------------------------------------ catalogue
 

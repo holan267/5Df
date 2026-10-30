@@ -27,6 +27,7 @@ Toàn bộ là **phân tích tĩnh**: không chạy code trên máy ảnh. Mỗi
 | `tools/latent_effects.py` | Grain (nhiễu tất định + lưới 17³ / bảng 8 bit) và halation |
 | `tools/latent_traits.py` | Đo tính chất từng film từ cube (tương phản, shadow, highlight, độ bão hòa, ám màu) và sinh mô tả (mục 6.3) |
 | `app/latent_app.py`, `app/index.html` | Giao diện web local để xem trước và export, dùng `latent_develop.py` làm backend (mục 6.2) |
+| `app/web/`, `app/coi-sw.js` | Cùng giao diện đó chạy hẳn trong trình duyệt, không cần Python: Pyodide + LibRaw‑Wasm (mục 6.2.1) |
 | `samples/` | Cube mẫu: P400, 5000 K, push 0, giấy #0 |
 
 ### Tạo lại kết quả Ghidra
@@ -411,6 +412,16 @@ uv run analysis/app/latent_app.py              # mở http://127.0.0.1:8765
 - Phím tắt: `[` `]` đổi film, `-` `=` giảm/tăng phơi sáng ⅓ stop, `0` về 0 EV, `Z` chuyển giữa vừa khung và 100%, giữ `C` để so với lần tráng trước.
 - Trỏ chuột (hoặc focus bàn phím) vào mã film để xem mô tả (mục 6.3): tên đầy đủ, tag, đường cong tone, thanh điểm. Lần chạy đầu server đo cả 20 film trong nền (khoảng 30 giây), sau đó đọc lại từ `latent_traits_<hash>.json` trong thư mục tạm của hệ thống.
 - **Không host công khai.** App cần `AUTOEXEC.BIN` (chứa khóa) và các pack `LATENT/*.LTP` của Latent Studios. Nếu muốn dùng từ máy khác, chạy `--host 0.0.0.0` trong mạng riêng hoặc qua VPN (ví dụ Tailscale). App không có đăng nhập.
+
+#### 6.2.1 Không cần Python: chạy trong trình duyệt (`app/web/`)
+
+```sh
+node analysis/app/web/serve.mjs                # rồi mở http://127.0.0.1:8765/app/
+```
+
+Server tĩnh nào phục vụ thư mục `analysis/` cũng được. Trang chạy nguyên code Python ở trên trong Pyodide (WebAssembly), và dùng LibRaw‑Wasm thay cho rawpy. Người dùng chọn thư mục kit (`AUTOEXEC.BIN` + pack) ngay trong trình duyệt; file được đọc tại chỗ, không upload đi đâu.
+
+Ảnh tráng ra trùng với bản Python trước bước JPEG (sai khác ±1 do làm tròn). File JPEG thì khác đôi chút vì Pyodide dùng libjpeg 9. Preview chậm hơn khoảng 1,5–2 lần, export cỡ đầy đủ mất khoảng 1,5 phút. Cách chạy, số đo và giới hạn: [app/web/README.md](app/web/README.md).
 
 ### 6.3 Mô tả tính chất film từ cube (`tools/latent_traits.py`)
 

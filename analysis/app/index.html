@@ -82,6 +82,24 @@
   .tools button:hover { border-color: #fff5; }
   .tag { position: absolute; left: 12px; bottom: 12px; background: #000a; padding: 4px 9px; border-radius: 6px; font-size: 12px; display: none; }
 
+  /* kit picker (browser build only) */
+  .kit { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: #0d0d0d; z-index: 2; }
+  .kit[hidden] { display: none; }
+  .kit > div { max-width: 440px; }
+  .kit h2 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+  .kit p { margin: 0 0 12px; color: var(--muted); line-height: 1.5; }
+  .kit code { font-family: var(--mono); font-size: 12px; color: var(--text); }
+  .kit .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  .kit button, header .hbtn {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; cursor: pointer;
+  }
+  .kit button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .kit button:disabled { opacity: .5; cursor: default; }
+  .kit .note { margin-top: 10px; font-size: 12px; }
+  .kit .note.err { color: var(--danger); }
+  header .hbtn { padding: 3px 9px; font-size: 12px; }
+  header .hbtn[hidden] { display: none; }
+
   /* side panel */
   .side { grid-area: side; border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; }
   .sec { padding: 12px 14px; border-bottom: 1px solid var(--line); }
@@ -176,6 +194,7 @@
     <h1>Latent <span>Darkroom</span></h1>
     <div id="title"></div>
     <div id="status">loading…</div>
+    <button class="hbtn" id="kitBtn" title="Choose another kit folder" hidden>Kit…</button>
   </header>
 
   <aside class="files" id="files">
@@ -191,6 +210,20 @@
       <button id="cmp" title="Hold to see the previous render (or hold C)">Compare</button>
       <button id="zoom" title="Toggle fit / 100% (or press Z)">100%</button>
     </div>
+    <div class="kit" id="kit" hidden><div>
+      <h2>Open your Ritual kit</h2>
+      <p>Choose the folder that holds <code>AUTOEXEC.BIN</code> and the film packs: the <code>kit</code> folder
+        of the Ritual download, or the root of the camera's card (<code>AUTOEXEC.BIN</code> + <code>LATENT/</code>).
+        Raw files in that folder are listed too.</p>
+      <p>Everything runs in this tab (Python via Pyodide, LibRaw via WebAssembly). Nothing is uploaded;
+        the packs are read in place, only the parts a render needs.</p>
+      <div class="btns">
+        <button class="primary" id="kitPick">Choose folder…</button>
+        <button id="kitReopen" hidden></button>
+      </div>
+      <input type="file" id="kitInput" webkitdirectory hidden>
+      <div class="note" id="kitNote"></div>
+    </div></div>
   </main>
 
   <aside class="side">
@@ -296,6 +329,217 @@ async function api(path) {
   return r.json();
 }
 
+// ---------------------------------------------------------------- backends
+//
+// latent_app.py serves this page at "/" next to its HTTP API. Served from anywhere else
+// (any static server), the page does the work itself: web/worker.js runs the same Python
+// in Pyodide with LibRaw-Wasm, on a kit folder the user picks.
+
+const http = {
+  start: async () => { const films = await api("api/films"); return { films, files: await api("api/files") }; },
+  files: () => api("api/files"),
+  traits: () => api("api/traits"),
+  thumb: async (id) => "api/thumb?file=" + encodeURIComponent(id),
+  async upload(f) {
+    const r = await fetch("api/upload", { method: "POST", headers: { "X-Filename": f.name }, body: f });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    return j.id;
+  },
+  async render(q, download, signal) {
+    const r = await fetch("api/render?" + q + (download ? "&download=1" : ""), { signal });
+    if (r.status === 204) return null;      // superseded by a newer request
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    const name = (/filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "") || [])[1] || "latent.jpg";
+    return { blob: await r.blob(), info: JSON.parse(r.headers.get("X-Latent-Info")), name };
+  },
+};
+
+function spawn(role) {
+  const w = new Worker("web/worker.js", { type: "module", name: "latent-" + role });
+  const pending = new Map();
+  let next = 0;
+  w.onmessage = ({ data }) => {
+    const p = pending.get(data.id); pending.delete(data.id);
+    if (data.error !== undefined) p.reject(new Error(data.error)); else p.resolve(data.out);
+  };
+  w.onerror = (e) => {
+    for (const p of pending.values()) p.reject(new Error(e.message || "worker failed to start"));
+    pending.clear();
+  };
+  const call = (op, args = {}, transfer = []) => new Promise((resolve, reject) => {
+    const id = next++; pending.set(id, { resolve, reject }); w.postMessage({ id, op, args }, transfer);
+  });
+  return { call, stop: () => w.terminate() };
+}
+
+const wasm = {
+  worker: null, thumbs: new Map(), traitsP: null,
+  async start(kit) {
+    if (this.worker) this.worker.stop();
+    this.thumbs.clear();
+    this.worker = spawn("render");
+    this.traitsP = measureTraits(kit);
+    return this.worker.call("init", { kit, role: "render" });
+  },
+  files() { return this.worker.call("files"); },
+  traits() { return this.traitsP; },
+  async thumb(id) {
+    if (!this.thumbs.has(id)) {
+      this.thumbs.set(id, this.worker.call("thumb", { file: id })
+        .then((jpg) => URL.createObjectURL(new Blob([jpg], { type: "image/jpeg" }))));
+    }
+    return this.thumbs.get(id);
+  },
+  async upload(f) {
+    const data = await f.arrayBuffer();
+    return this.worker.call("upload", { name: f.name, data }, [data]);
+  },
+  async render(q, download) {
+    const r = await this.worker.call("render", { query: q, download });
+    if (r.superseded) return null;
+    return { blob: new Blob([r.jpg], { type: "image/jpeg" }), info: r.info, name: r.name || "latent.jpg" };
+  },
+};
+
+let backend = http;
+
+// Small key-value store for the kit folder handle and the measured film descriptions.
+const idb = {
+  db: null,
+  open() {
+    return this.db || (this.db = new Promise((resolve, reject) => {
+      const r = indexedDB.open("latent-darkroom", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("kv");
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    }));
+  },
+  async run(mode, fn) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const t = db.transaction("kv", mode), req = fn(t.objectStore("kv"));
+      t.oncomplete = () => resolve(req.result);
+      t.onerror = () => reject(t.error);
+    });
+  },
+  get(key) { return this.run("readonly", (s) => s.get(key)).catch(() => undefined); },
+  set(key, value) { return this.run("readwrite", (s) => s.put(value, key)).catch(() => {}); },
+};
+
+// The descriptions take a while to measure (latent_traits.py over every pack), so a second
+// worker does it, once per set of packs: the result is kept until a pack or the code changes.
+async function measureTraits(kit) {
+  const src = await (await fetch("../tools/latent_traits.py")).text();
+  const sig = kit.filter((k) => /\.LTP$/i.test(k.path)).map((k) => `${k.path} ${k.file.size} ${k.file.lastModified};`).join("");
+  const hash = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(src + sig));
+  const key = "traits:" + [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  let t = await idb.get(key);
+  if (!t) {
+    const w = spawn("traits");
+    try { t = await w.call("init", { kit, role: "traits" }); } finally { w.stop(); }
+    if (!t.error) idb.set(key, t);
+  }
+  return { ready: true, error: t.error, films: t.films };
+}
+
+// ---------------------------------------------------------------- kit folder (browser build)
+
+const KIT_FILE = /(^|\/)(AUTOEXEC\.BIN|[^/]+\.LTP|GRAIN\.LTG|[^/]+\.CR2|[^/]+\.ARW)$/i;
+
+async function walk(dir, prefix = "", depth = 0, out = []) {
+  for await (const [name, h] of dir.entries()) {
+    if (name.startsWith(".")) continue;
+    if (h.kind === "directory") { if (depth < 5) await walk(h, prefix + name + "/", depth + 1, out); }
+    else if (KIT_FILE.test(name)) out.push({ path: prefix + name, file: await h.getFile() });
+  }
+  return out;
+}
+
+function kitPanel(note, err) {
+  $("kit").hidden = false;
+  $("kitNote").textContent = note || "";
+  $("kitNote").classList.toggle("err", !!err);
+}
+
+async function openKit(kit, label) {
+  $("kitPick").disabled = $("kitReopen").disabled = true;
+  kitPanel(`Loading Python and LibRaw (first visit downloads about 20 MB)…`);
+  setStatus("starting…");
+  try {
+    const { films, files } = await wasm.start(kit);
+    $("kit").hidden = true;
+    $("kitBtn").hidden = false;
+    started(films, files, label);
+  } catch (e) {
+    kitPanel(e.message, true);
+    setStatus(e.message, true);
+  } finally {
+    $("kitPick").disabled = $("kitReopen").disabled = false;
+  }
+}
+
+async function chooseKit() {
+  if (!window.showDirectoryPicker) { $("kitInput").click(); return; }
+  let handle;
+  try { handle = await showDirectoryPicker({ id: "latent-kit" }); } catch (e) { return; }   // cancelled
+  idb.set("kit-handle", handle);
+  kitPanel("Reading the folder…");
+  openKit(await walk(handle), handle.name);
+}
+
+$("kitPick").onclick = chooseKit;
+$("kitBtn").onclick = () => { if ($("kit").hidden) kitPanel(); else $("kit").hidden = !FILMS.length; };
+$("kitInput").onchange = (e) => {
+  // webkitRelativePath starts with the picked folder's own name.
+  const list = [...e.target.files].map((file) => ({ path: file.webkitRelativePath.replace(/^[^/]*\//, ""), file }))
+    .filter((k) => KIT_FILE.test(k.path));
+  const top = e.target.files.length ? e.target.files[0].webkitRelativePath.split("/")[0] : "";
+  openKit(list, top);
+};
+
+async function startWasm() {
+  if (!(await isolate())) {
+    kitPanel("This page needs cross-origin isolation (for LibRaw's SharedArrayBuffer). Open it from " +
+             "http://localhost or https, in a browser with service workers, or serve it with the headers " +
+             "Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: require-corp.", true);
+    $("kitPick").disabled = true;
+    setStatus("not cross-origin isolated", true);
+    return;
+  }
+  backend = wasm;
+  setStatus("choose a kit folder");
+  const handle = await idb.get("kit-handle");
+  if (handle && handle.queryPermission) {
+    if ((await handle.queryPermission({ mode: "read" })) === "granted") {
+      kitPanel("Reading " + handle.name + "…");
+      return openKit(await walk(handle), handle.name);
+    }
+    $("kitReopen").hidden = false;
+    $("kitReopen").textContent = "Reopen " + handle.name;
+    $("kitReopen").onclick = async () => {
+      if ((await handle.requestPermission({ mode: "read" })) !== "granted") return;
+      kitPanel("Reading " + handle.name + "…");
+      openKit(await walk(handle), handle.name);
+    };
+  }
+  kitPanel();
+}
+
+// coi-sw.js adds COOP/COEP to this page's responses; it takes effect after one reload.
+async function isolate() {
+  if (self.crossOriginIsolated) { sessionStorage.removeItem("coi-reload"); return true; }
+  if (!("serviceWorker" in navigator) || !isSecureContext || sessionStorage.getItem("coi-reload")) {
+    sessionStorage.removeItem("coi-reload");
+    return false;
+  }
+  await navigator.serviceWorker.register("coi-sw.js");
+  await navigator.serviceWorker.ready;
+  sessionStorage.setItem("coi-reload", "1");
+  location.reload();
+  return new Promise(() => {});
+}
+
 // ---------------------------------------------------------------- files
 
 function renderFiles() {
@@ -304,7 +548,8 @@ function renderFiles() {
     const b = document.createElement("button");
     b.className = "file" + (f.id === S.file ? " on" : "");
     b.innerHTML = `<img loading="lazy" alt=""><span></span>`;
-    b.querySelector("img").src = "/api/thumb?file=" + encodeURIComponent(f.id);
+    const img = b.querySelector("img");
+    backend.thumb(f.id).then((url) => { img.src = url; }, () => {});
     b.querySelector("span").textContent = f.name + (f.uploaded ? " ↑" : "");
     b.onclick = () => { S.file = f.id; renderFiles(); update(); };
     $("files").appendChild(b);
@@ -312,14 +557,12 @@ function renderFiles() {
 }
 
 async function upload(list) {
+  if (!film) return;      // no kit open yet
   for (const f of list) {
-    setStatus("uploading " + f.name + "…");
-    const r = await fetch("/api/upload", { method: "POST", headers: { "X-Filename": f.name }, body: f });
-    const j = await r.json();
-    if (!r.ok) { setStatus(j.error, true); continue; }
-    S.file = j.id;
+    setStatus("adding " + f.name + "…");
+    try { S.file = await backend.upload(f); } catch (e) { setStatus(e.message, true); }
   }
-  FILES = await api("/api/files");
+  FILES = await backend.files();
   renderFiles(); update();
 }
 $("drop").onclick = () => $("picker").click();
@@ -367,7 +610,7 @@ function selectFilm(code) {
 
 async function loadTraits() {
   try {
-    const t = await api("/api/traits");
+    const t = await backend.traits();
     if (t.error) return;
     if (!t.ready) { setTimeout(loadTraits, 2000); return; }
     TRAITS = t.films; showFilmName();
@@ -532,11 +775,10 @@ async function renderPreview() {
   $("busy").classList.add("on");
   setStatus("developing…");
   try {
-    const r = await fetch("/api/render?" + query({ scale: S.scale, quality: 90 }), { signal: ctrl.signal });
-    if (r.status === 204) return;           // superseded by a newer request
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
-    const info = JSON.parse(r.headers.get("X-Latent-Info"));
-    const url = URL.createObjectURL(await r.blob());
+    const r = await backend.render(query({ scale: S.scale, quality: 90 }), false, ctrl.signal);
+    if (!r) return;                         // superseded by a newer request
+    const info = r.info;
+    const url = URL.createObjectURL(r.blob);
     if (previous && previous !== current) URL.revokeObjectURL(previous);
     previous = current; current = url;
     showImage(url);
@@ -616,13 +858,10 @@ document.addEventListener("keyup", (e) => { if (e.key === "c" || e.key === "C") 
 $("export").onclick = async () => {
   const btn = $("export"); btn.disabled = true; btn.textContent = "Rendering full size…";
   try {
-    const r = await fetch("/api/render?" + query({ scale: 1, quality: S.quality, download: 1 }));
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
-    const name = (/filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "") || [])[1] || "latent.jpg";
+    const { blob, info, name } = await backend.render(query({ scale: 1, quality: S.quality }), true);
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(await r.blob()); a.download = name; a.click();
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    const info = JSON.parse(r.headers.get("X-Latent-Info"));
     setStatus(`exported ${name} · ${(info.ms / 1000).toFixed(1)} s`);
   } catch (e) {
     setStatus(e.message, true);
@@ -633,15 +872,24 @@ $("export").onclick = async () => {
 
 // ---------------------------------------------------------------- start
 
-(async () => {
-  try {
-    [FILMS, FILES] = await Promise.all([api("/api/films"), api("/api/files")]);
-  } catch (e) { setStatus(e.message, true); return; }
+function started(films, files, label) {
+  [FILMS, FILES] = [films, files];
   if (!FILES.some((f) => f.id === S.file)) S.file = FILES.length ? FILES[0].id : "";
+  TRAITS = null; lastInfo = null;
   renderFiles();
-  setStatus(`${FILMS.length} films · ${FILES.length} raw files`);
+  setStatus(`${FILMS.length} films · ${FILES.length} raw files` + (label ? " · " + label : ""));
   selectFilm(S.film);
   loadTraits();
+}
+
+(async () => {
+  // Opened as ".../app" the relative URLs below would resolve against the parent folder.
+  if (!/\/$|\.html$/.test(location.pathname)) { location.replace(location.pathname + "/" + location.search); return; }
+  // Under latent_app.py the API answers; on a static server it is a 404 (or an HTML page).
+  let r = null;
+  try { r = await http.start(); } catch (e) {}
+  if (r) started(r.films, r.files);
+  else startWasm().catch((e) => setStatus(e.message, true));
 })();
 </script>
 </body>
