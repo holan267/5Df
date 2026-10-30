@@ -1,0 +1,24 @@
+00985158 3 LatentAheadWork | LatentAheadDone | LatentRead
+0098533c 1 LTPACK2
+0098a6a8 2 tGuiMainTa | LatentGui
+00994094 1 LTCUBE2
+00994378 1 LTGRAIN4
+0099437c 1 LTGRAIN4
+00994d0c 2 D250NX | \x11
+00996940 2 Canon | Ritual
+0099a998 1 0123456789abcdef
+0099b3d0 2 A:/LATENT/ | /GRAIN.LTG
+0099b750 1 A:/LATENT/LAST.TXT
+0099ccac 65 stage | saves_create | saves_open | task_result | task_priority | outcome | gui_facts | gui_samples | display_result | unavailable_reasons | preparation_status | manager_semaphore | gui_semaphore | gui_queue | bitmap_initialized | power_permission | lock_permission | display_type | y_scale | interlace | palette | foreground | background | prepared | display_requested | stale_display | paint_native
+0099d198 2 A:/DCIM/ | EOS5D/
+0099d208 3 A:/DCIM/ | EOS5D/ | 
+0099d264 1 A:/LATENT/
+0099d294 194 J.LOG | .LOG | A:/LATENT/R | frame | pass_picture_jpeg | develop_stage | develop_result | table_loads | grain_loaded | light_mired_q16 | light_kelvin_outside | light_steps | camera_white_balance | pack_loads_table_decodes | table_ms | table_steps_stored | cr2_reads | cr2_seeks | cr2_read_failures | cr2_reads_ahead | cr2_read_ms_walk_all | read_buffer_size | out_wh | ms_to_walked | ms_to_picture | 
+0099e950 2 LatentDev | LatentPic
+0099f090 2 A:/RITUAL/ | EOS5D/
+009a0f18 6 Kodachrome | , pulled  | , pushed  |  stop |  stops |  grade 
+009a1714 7 A:/LATENT/SESSION.TXT | A:/LATENT/REMOVE.TST | A:/LATENT/NAMED.TST | A:/LATENT/WRITE.TST | A:/LATENT/ | A:/LATENT/WELCOME.REQ | A:/LATENT/LAST.TXT
+009a3590 1 Latent
+009a4a80 4 Ritual | by Latent Studios | www.latentstudios.art | Reading the card
+009a4b54 29  photograph |  photographs | Roll  | Box speed | Pushed  | Pulled  |  stops |  stop | Development | Paper | Printed on | Grade | Halation | from each frame\'s raw | last  |  K | Light | SET | starts a new roll with these from your next frame | prints the rest of this roll this way | this roll ends at frame  | Loaded | Share size | Developing |  waiting | film | shelf | change | photographs
+009a5774 13 No photographs yet | Each frame you shoot develops on | film | browse | close | Share size next | Share size developing | Developed | Delete  | Its raw, Canon\'s JPEG and its print leave the card | SET | delete | any other key keeps it
