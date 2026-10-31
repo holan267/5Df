@@ -1,5 +1,7 @@
 #!/bin/sh
 # Builds Rust + LibRaw into one module, from analysis/engine, with em++ and cargo on PATH.
+# The module is .js, not .mjs: some static hosts send no Content-Type for .mjs, and browsers
+# refuse a module script without a JavaScript type.
 # Either the Dockerfile's image:
 #   docker build -t latent-engine-build analysis/engine
 #   docker run --rm -v "$PWD:/src" -w /src/analysis/engine latent-engine-build sh build.sh
@@ -36,7 +38,7 @@ cargo build --release --target wasm32-unknown-emscripten -p latent-engine
 
 EXPORTS=_malloc,_free,$(grep -o 'extern "C" fn engine_[a-z0-9_]*' wasm/src/lib.rs | sed 's/.* fn /_/' | paste -sd, -)
 # shellcheck disable=SC2086
-em++ "$OBJ"/*.o target/wasm32-unknown-emscripten/release/liblatent_engine.a -o "$OUT/latent_engine.mjs" \
+em++ "$OBJ"/*.o target/wasm32-unknown-emscripten/release/liblatent_engine.a -o "$OUT/latent_engine.js" \
   -O3 -msimd128 $EH \
   -sMODULARIZE -sEXPORT_ES6 -sEXPORT_NAME=LatentEngine -sENVIRONMENT=worker,node \
   -sFILESYSTEM=0 -sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=64MB -sMAXIMUM_MEMORY=4GB -sSTACK_SIZE=5MB \
@@ -44,5 +46,6 @@ em++ "$OBJ"/*.o target/wasm32-unknown-emscripten/release/liblatent_engine.a -o "
 
 DEST=../app/public/vendor/latent-engine
 mkdir -p "$DEST"
-cp "$OUT/latent_engine.mjs" "$OUT/latent_engine.wasm" "$DEST/"
+rm -f "$DEST/latent_engine.mjs"
+cp "$OUT/latent_engine.js" "$OUT/latent_engine.wasm" "$DEST/"
 ls -l "$DEST"

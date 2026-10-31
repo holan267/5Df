@@ -26,7 +26,7 @@ export interface Comparison { max: number; differ: number; values: number; histo
 
 export async function loadEngine(base: string) {
   // Stays out of the bundle, in public/, next to its .wasm.
-  const { default: LatentEngine } = await import(/* @vite-ignore */ `${base}vendor/latent-engine/latent_engine.mjs`);
+  const { default: LatentEngine } = await import(/* @vite-ignore */ `${base}vendor/latent-engine/latent_engine.js`);
   const m = await LatentEngine();
 
   const json = <T>(p: number) => JSON.parse(m.UTF8ToString(p)) as Reply<T>;

@@ -1,6 +1,6 @@
 # latent_engine
 
-`latent_engine.mjs` and `latent_engine.wasm` are built from `analysis/engine` by its
+`latent_engine.js` and `latent_engine.wasm` are built from `analysis/engine` by its
 `build.sh` (see `analysis/engine/README.md`). They are one module: the pipeline in Rust
 plus LibRaw, linked statically.
 

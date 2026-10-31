@@ -18,7 +18,7 @@ docker build -t latent-engine-build analysis/engine
 docker run --rm -v "$PWD:/src" -w /src/analysis/engine latent-engine-build sh build.sh
 ```
 
-Kết quả nằm trong `app/public/vendor/latent-engine/` và được commit, nên `npm run build` không cần toolchain này. Không để Vite bundle: `engine.worker.ts` import file đó lúc chạy, và `.mjs` tìm `.wasm` cạnh nó.
+Kết quả nằm trong `app/public/vendor/latent-engine/` và được commit, nên `npm run build` không cần toolchain này. Không để Vite bundle: `engine.worker.ts` import file đó lúc chạy, và `.js` tìm `.wasm` cạnh nó. Module là ES module nhưng phải giữ đuôi `.js`: có host (ví dụ `free.nf`) không gửi `Content-Type` cho `.mjs`, và trình duyệt từ chối module script không có MIME JavaScript, báo `Failed to fetch dynamically imported module`. Thiếu `Content-Type` cho `.wasm` thì không sao: Emscripten tự chuyển sang tải bằng `ArrayBuffer`.
 
 - rustc 1.97 và emsdk 6.0.6, ghim trong `Dockerfile`. Doc của Rust ghi 3.1.68, nhưng `wasm-opt` của bản đó báo `Unknown option '--enable-bulk-memory-opt'`.
 - Phải dùng `wasm32-unknown-emscripten`: `wasm32-unknown-unknown` không có libc++ cho LibRaw. Vì vậy không có `wasm-bindgen`; API là các hàm `extern "C"` trong `wasm/src/lib.rs`, `build.sh` tự xuất mọi `engine_*`, và `app/src/engine/wasm.ts` bọc lại.
