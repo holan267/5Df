@@ -17,9 +17,11 @@ Every stage that does not depend on the sliders is cached: the demosaiced raw
 per file and size, decoded cubes, grain packs and noise planes, halation maps.
 Film descriptions (latent_traits.py) are measured in the background at start-up
 and kept in a JSON file in the system temp folder until a pack changes.
-The server only needs the standard library on top of the CLI's dependencies.
+The server only needs the standard library on top of the CLI's dependencies. The page is
+the React app in this folder: build it once with npm install && npm run build.
 The same page also runs without Python, entirely in the browser: see web/README.md.
-Lite packs work here too: --latent-dir LATENT_LITE --autoexec LATENT_LITE/firmware.bin.
+Lite packs work here too: --latent-dir analysis/app/public/LATENT_LITE
+--autoexec analysis/app/public/LATENT_LITE/firmware.bin.
 
 AUTOEXEC.BIN and LATENT/ hold Latent Studios' key and film packs: keep the
 server on localhost or behind your own access control, do not host it publicly.
@@ -39,7 +41,7 @@ import time
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import numpy as np
 import rawpy
@@ -165,7 +167,7 @@ class Studio:
             h.update(("%s %d %d;" % (pack.code, st.st_size, st.st_mtime_ns)).encode())
         cache = os.path.join(tempfile.gettempdir(), "latent_traits_%s.json" % h.hexdigest()[:16])
         try:
-            with open(cache) as f:
+            with open(cache, encoding="utf-8") as f:
                 self.traits = json.load(f)
             return
         except (OSError, ValueError):
@@ -176,7 +178,7 @@ class Studio:
             self.traits_error = "%s: %s" % (type(e).__name__, e)
             return
         tmp = cache + ".%d" % os.getpid()
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(traits, f, ensure_ascii=False)
         os.replace(tmp, cache)
         self.traits = traits
@@ -376,7 +378,9 @@ class Studio:
 # ---------------------------------------------------------------- HTTP
 
 def make_handler(studio):
-    index_path = os.path.join(HERE, "index.html")
+    dist = os.path.join(HERE, "dist")
+    types = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+             ".css": "text/css; charset=utf-8", ".json": "application/json", ".wasm": "application/wasm"}
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -397,6 +401,19 @@ def make_handler(studio):
         def send_json(self, obj, status=HTTPStatus.OK):
             self.send(status, json.dumps(obj).encode(), "application/json")
 
+        def send_static(self, url_path):
+            """The page, as built by Vite into dist/."""
+            path = os.path.realpath(os.path.join(dist, url_path.lstrip("/") or "index.html"))
+            if not os.path.isfile(path) or not path.startswith(os.path.realpath(dist) + os.sep):
+                if os.path.isfile(os.path.join(dist, "index.html")):
+                    self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+                else:
+                    self.send(HTTPStatus.SERVICE_UNAVAILABLE, b"The page is not built: run npm install && npm run build in analysis/app.",
+                              "text/plain; charset=utf-8")
+                return
+            with open(path, "rb") as f:
+                self.send(HTTPStatus.OK, f.read(), types.get(os.path.splitext(path)[1], "application/octet-stream"))
+
         def guarded(self, fn):
             try:
                 fn()
@@ -416,10 +433,7 @@ def make_handler(studio):
         def get(self):
             url = urlparse(self.path)
             q = parse_qs(url.query)
-            if url.path in ("/", "/index.html"):
-                with open(index_path, "rb") as f:
-                    self.send(HTTPStatus.OK, f.read(), "text/html; charset=utf-8")
-            elif url.path == "/api/films":
+            if url.path == "/api/films":
                 self.send_json(studio.films())
             elif url.path == "/api/traits":
                 self.send_json({"ready": studio.traits is not None, "error": studio.traits_error,
@@ -441,8 +455,10 @@ def make_handler(studio):
                     stem = os.path.splitext(os.path.basename(studio.resolve(p["file"])))[0]
                     headers.append(("Content-Disposition", 'attachment; filename="%s_%s.jpg"' % (stem, p["film"])))
                 self.send(HTTPStatus.OK, jpg, "image/jpeg", headers)
-            else:
+            elif url.path.startswith("/api/"):
                 self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            else:
+                self.send_static(unquote(url.path))
 
         def post(self):
             if urlparse(self.path).path != "/api/upload":

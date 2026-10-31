@@ -8,30 +8,45 @@
 // A LATENT_LITE folder (tools/latent_lite.py) mounts the same way. Lite packs can also come
 // from a URL: see mountLite.
 import { loadPyodide } from "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pyodide.mjs";
-import LibRawModule from "./vendor/libraw-wasm/libraw.js";
+import latentApp from "../latent_app.py?raw";
+import rawpy from "./rawpy.py?raw";
+import latentWeb from "./latent_web.py?raw";
+import color from "../../tools/latent_color.py?raw";
+import crypt from "../../tools/latent_crypt.py?raw";
+import develop from "../../tools/latent_develop.py?raw";
+import effects from "../../tools/latent_effects.py?raw";
+import liteTool from "../../tools/latent_lite.py?raw";
+import ltp from "../../tools/latent_ltp.py?raw";
+import traits from "../../tools/latent_traits.py?raw";
 
-// Pyodide path -> URL relative to this file; the layout mirrors analysis/ so the
-// modules find each other as they do on disk.
+// Pyodide path -> source; the layout mirrors analysis/ so the modules find each other
+// as they do on disk.
 const SOURCES = {
-  "/analysis/app/latent_app.py": "../latent_app.py",
-  "/analysis/app/web/rawpy.py": "rawpy.py",
-  "/analysis/app/web/latent_web.py": "latent_web.py",
-  ...Object.fromEntries(["color", "crypt", "develop", "effects", "lite", "ltp", "traits"].map(
-    (m) => [`/analysis/tools/latent_${m}.py`, `../../tools/latent_${m}.py`])),
+  "/analysis/app/latent_app.py": latentApp,
+  "/analysis/app/web/rawpy.py": rawpy,
+  "/analysis/app/web/latent_web.py": latentWeb,
+  "/analysis/tools/latent_color.py": color,
+  "/analysis/tools/latent_crypt.py": crypt,
+  "/analysis/tools/latent_develop.py": develop,
+  "/analysis/tools/latent_effects.py": effects,
+  "/analysis/tools/latent_lite.py": liteTool,
+  "/analysis/tools/latent_ltp.py": ltp,
+  "/analysis/tools/latent_traits.py": traits,
 };
 const KIT = "/kit", LITE = "/lite", RAWS = "/raws", UPLOADS = "/uploads";
 const RAW_RE = /\.(cr2|arw)$/i;
 
 let py = null, web = null, lite = null;
 
-async function boot() {
+// base: the app's root URL. LibRaw stays out of the bundle, in public/: its pthreads start
+// new Workers on its own libraw.js, which only holds if the file keeps its name and place.
+async function boot(base) {
+  const { default: LibRawModule } = await import(/* @vite-ignore */ `${base}vendor/libraw-wasm/libraw.js`);
   const [pyodide, libraw] = await Promise.all([loadPyodide(), LibRawModule()]);
   await pyodide.loadPackage(["numpy", "pillow"]);
-  for (const [path, url] of Object.entries(SOURCES)) {
-    const r = await fetch(new URL(url, import.meta.url), { cache: "no-cache" });
-    if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  for (const [path, source] of Object.entries(SOURCES)) {
     pyodide.FS.mkdirTree(path.slice(0, path.lastIndexOf("/")));
-    pyodide.FS.writeFile(path, await r.text());
+    pyodide.FS.writeFile(path, source);
   }
   const decoder = new libraw.LibRaw();
   pyodide.registerJsModule("_libraw", {
@@ -137,8 +152,8 @@ function call(fn, ...args) {
 }
 
 const ops = {
-  async init({ kit, liteUrl: url, role }) {
-    await boot();
+  async init({ kit, liteUrl: url, role, base }) {
+    await boot(base);
     const { autoexec, latent } = mountKit(kit, !!url) || await mountLite(url);
     if (role === "traits") return JSON.parse(call(web.traits, autoexec, latent));
     const r = call(web.start, autoexec, latent, RAWS, UPLOADS);

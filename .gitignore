@@ -3,3 +3,5 @@
 LATENT/
 LATENT_LITE/
 .DS_Store
+node_modules/
+dist/

@@ -18,7 +18,7 @@ Contents of the build:
 
 The build uses pthreads (`-s USE_PTHREADS=1`), so its memory is a `SharedArrayBuffer`
 and the page has to be cross-origin isolated; `../../coi-sw.js` takes care of that.
-It is also compiled with `-ffast-math`; see `../README.md` for how closely it matches rawpy.
+It is also compiled with `-ffast-math`; see `analysis/app/web/README.md` for how closely it matches rawpy.
 
 To update: `npm pack libraw-wasm@<version>`, copy `package/dist/libraw.js` and
 `package/dist/libraw.wasm` here, and check `analysis/app/web/README.md` still holds.

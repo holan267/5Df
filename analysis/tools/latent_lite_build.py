@@ -5,7 +5,7 @@
 # ///
 """Build lite film packs (see latent_lite.py) from the .LTP packs and their GRAIN.LTG.
 
-    uv run analysis/tools/latent_lite_build.py [P400 V050 ...] [--out LATENT_LITE] [--jobs 2]
+    uv run analysis/tools/latent_lite_build.py [P400 V050 ...] [--out analysis/app/public/LATENT_LITE] [--jobs 2]
 
 The rank of each paper is the smallest step of RANKS whose 99th percentile error, over
 every cube of the paper at a 17^3 subset of the nodes, stays under --max-error 8-bit levels,
@@ -311,7 +311,7 @@ def main():
     p.add_argument("films", nargs="*", help="film codes (default: every pack)")
     p.add_argument("--autoexec", default=os.path.join(repo, "AUTOEXEC.BIN"))
     p.add_argument("--latent-dir", default=os.path.join(repo, "LATENT"))
-    p.add_argument("--out", default=os.path.join(repo, "LATENT_LITE"))
+    p.add_argument("--out", default=os.path.join(repo, "analysis", "app", "public", "LATENT_LITE"))
     p.add_argument("--delta", type=float, default=0.5, help="basis quantisation step, in 8-bit levels (default 0.5)")
     p.add_argument("--max-error", type=float, default=0.75, help="p99 target for the rank choice, in 8-bit levels (default 0.75)")
     p.add_argument("--jobs", type=int, default=2, help="films built at once, about 1.5 GB each (default 2)")

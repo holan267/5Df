@@ -26,8 +26,8 @@ Toàn bộ là **phân tích tĩnh**: không chạy code trên máy ảnh. Mỗi
 | `tools/latent_develop.py` | Tráng CR2 của 5D (và raw máy khác như Sony `.ARW`, mục 6.1) thành JPG với profile film (P400, V050…) |
 | `tools/latent_effects.py` | Grain (nhiễu tất định + lưới 17³ / bảng 8 bit) và halation |
 | `tools/latent_traits.py` | Đo tính chất từng film từ cube (tương phản, shadow, highlight, độ bão hòa, ám màu) và sinh mô tả (mục 6.3) |
-| `app/latent_app.py`, `app/index.html` | Giao diện web local để xem trước và export, dùng `latent_develop.py` làm backend (mục 6.2) |
-| `app/web/`, `app/coi-sw.js` | Cùng giao diện đó chạy hẳn trong trình duyệt, không cần Python: Pyodide + LibRaw‑Wasm (mục 6.2.1) |
+| `app/latent_app.py`, `app/src/` | Giao diện web (React, Vite, shadcn/ui) để xem trước và export, dùng `latent_develop.py` làm backend (mục 6.2); `npm run build` trong `app/` trước khi chạy |
+| `app/web/`, `app/public/` | Cùng giao diện đó chạy hẳn trong trình duyệt, không cần Python: Pyodide + LibRaw‑Wasm (mục 6.2.1) |
 | `samples/` | Cube mẫu: P400, 5000 K, push 0, giấy #0 |
 
 ### Tạo lại kết quả Ghidra
@@ -416,10 +416,10 @@ uv run analysis/app/latent_app.py              # mở http://127.0.0.1:8765
 #### 6.2.1 Không cần Python: chạy trong trình duyệt (`app/web/`)
 
 ```sh
-node analysis/app/web/serve.mjs                # rồi mở http://127.0.0.1:8765/app/
+cd analysis/app && npm install && npm run dev  # hoặc npm run build, rồi đưa dist/ lên server tĩnh
 ```
 
-Server tĩnh nào phục vụ thư mục `analysis/` cũng được. Trang chạy nguyên code Python ở trên trong Pyodide (WebAssembly), và dùng LibRaw‑Wasm thay cho rawpy. Người dùng chọn thư mục kit (`AUTOEXEC.BIN` + pack) ngay trong trình duyệt; file được đọc tại chỗ, không upload đi đâu.
+Trang chạy nguyên code Python ở trên trong Pyodide (WebAssembly), và dùng LibRaw‑Wasm thay cho rawpy. Có `public/LATENT_LITE/` thì trang mở thẳng vào lite pack (mục 6.4). Nếu không, người dùng chọn thư mục kit (`AUTOEXEC.BIN` + pack) ngay trong trình duyệt; file được đọc tại chỗ, không upload đi đâu.
 
 Ảnh tráng ra trùng với bản Python trước bước JPEG (sai khác ±1 do làm tròn). File JPEG thì khác đôi chút vì Pyodide dùng libjpeg 9. Preview chậm hơn khoảng 1,5–2 lần, export cỡ đầy đủ mất khoảng 1,5 phút. Cách chạy, số đo và giới hạn: [app/web/README.md](app/web/README.md).
 
@@ -440,9 +440,9 @@ uv run analysis/tools/latent_traits.py [P400 V050 ...] [--json out.json]
 ### 6.4 Lite pack: bản nhẹ của `.LTP` và `GRAIN.LTG` (`tools/latent_lite.py`, `tools/latent_lite_build.py`)
 
 ```sh
-uv run analysis/tools/latent_lite_build.py [P400 V050 ...] [--out LATENT_LITE] [--jobs 2]
+uv run analysis/tools/latent_lite_build.py [P400 V050 ...] [--out analysis/app/public/LATENT_LITE] [--jobs 2]
 uv run analysis/tools/latent_lite_build.py --keep-cubes      # giữ paper<i>.bin đã có, làm lại phần còn lại
-uv run analysis/app/latent_app.py --latent-dir LATENT_LITE --autoexec LATENT_LITE/firmware.bin
+uv run analysis/app/latent_app.py --latent-dir analysis/app/public/LATENT_LITE --autoexec analysis/app/public/LATENT_LITE/firmware.bin
 ```
 
 - `.LTP` gồm 99,3% là cube LTZ1 đã nén sẵn (khoảng 205 KB mỗi cube, không có khoảng trống), nhưng có tới 19.412 cube. Xuất text sẽ nặng hơn: mỗi `.cube` khoảng 7,2 MB, cả bộ khoảng 144 GB.
