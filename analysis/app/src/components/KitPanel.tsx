@@ -14,25 +14,24 @@ interface Props {
 
 const code = "font-mono text-xs text-foreground";
 
-// Only seen with no lite pack on the server, or through the header's Kit… button.
+// Only seen with no lite pack on the server, or through the header's Kit… button: there it
+// also adds a folder of raws.
 export function KitPanel({ kit, onChoose, onReopen, onPicked }: Props) {
   const input = useRef<HTMLInputElement>(null);
-  const disabled = kit.busy || kit.blocked;
+  const disabled = kit.busy;
   return (
     <div className="absolute inset-0 z-[2] grid place-items-center bg-viewer p-4">
       <Card className="max-w-[440px] gap-3">
         <CardHeader>
-          <CardTitle className="text-[15px]">Open your Ritual kit</CardTitle>
+          <CardTitle className="text-[15px]">Open a LATENT_LITE folder</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 leading-normal">
           <CardDescription className="text-[13px]">
-            Choose the folder that holds <code className={code}>AUTOEXEC.BIN</code> and the film packs: the <code className={code}>kit</code> folder
-            of the Ritual download, or the root of the camera's card (<code className={code}>AUTOEXEC.BIN</code> + <code className={code}>LATENT/</code>),
-            or a <code className={code}>LATENT_LITE</code> folder. Raw files in that folder are listed too.
+            Choose a <code className={code}>LATENT_LITE</code> folder, or one that holds it. Raw files in that folder are listed too.
           </CardDescription>
           <CardDescription className="text-[13px]">
-            Everything runs in this tab (Python via Pyodide, LibRaw via WebAssembly). Nothing is uploaded;
-            the packs are read in place, only the parts a render needs.
+            Everything runs in this tab (LibRaw and the pipeline in WebAssembly, the pixels on your GPU).
+            Nothing is uploaded; the packs are read in place, only the parts a render needs.
           </CardDescription>
           <div className="flex flex-wrap gap-2">
             <Button className="font-semibold" disabled={disabled} onClick={() => onChoose(() => input.current?.click())}>Choose folder…</Button>

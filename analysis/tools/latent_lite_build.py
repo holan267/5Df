@@ -36,6 +36,7 @@ import latent_ltp  # noqa: E402
 RANKS = ((2, 2), (3, 2), (3, 3), (4, 3), (5, 3), (5, 4), (6, 4), (6, 5), (8, 6), (8, 8), (10, 10), (13, 13), (13, 23))
 MAX_BASIS = 100 # past this a paper is hardly smaller than its cubes, so the error target gives way
 SUBSET = 4      # node step of the subset used for the factors and the rank choice
+PAPER_NAMES = 0x9B1D90      # 19 pointers, read by analysis/engine/core/src/studio.rs
 
 
 @njit(nogil=True)
@@ -243,8 +244,6 @@ def build_cubes(pack, folder, a, log):
 
 def firmware_ranges(p):
     """(address, length) of what the darkroom reads from the payload."""
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app"))
-    import latent_app
     import latent_traits
     base = latent_color.PAYLOAD_BASE
     ptrs = lambda addr, n: struct.unpack_from("<%dI" % n, p, addr - base)
@@ -257,7 +256,7 @@ def firmware_ranges(p):
     while p[addr - base] != 0x11:
         addr += 0x34
     keep.append((latent_effects.HALO_PROFILES, addr + 1 - latent_effects.HALO_PROFILES))
-    for table, n in ((latent_app.PAPER_NAMES, 19), (latent_traits.FAMILY_NAMES, 5), (latent_traits.BRAND_NAMES, 5)):
+    for table, n in ((PAPER_NAMES, 19), (latent_traits.FAMILY_NAMES, 5), (latent_traits.BRAND_NAMES, 5)):
         keep.append((table, 4 * n))
         keep += [cstr(s) for s in ptrs(table, n)]
     keep.append((latent_traits.CATALOGUE, 12 * latent_traits.CATALOGUE_N))

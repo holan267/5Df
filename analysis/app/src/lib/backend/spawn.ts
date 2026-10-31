@@ -3,7 +3,7 @@ interface Pending { resolve(v: any): void; reject(e: Error): void }
 export type Worked = ReturnType<typeof spawn>;
 
 export function spawn(onStatus: (text: string) => void) {
-  const w = new Worker(new URL("../../../web/worker.js", import.meta.url), { type: "module" });
+  const w = new Worker(new URL("../../engine/engine.worker.ts", import.meta.url), { type: "module" });
   const pending = new Map<number, Pending>();
   let next = 0;
   w.onmessage = ({ data }) => {

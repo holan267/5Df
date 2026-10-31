@@ -43,6 +43,7 @@ export default function App() {
 
       <Viewer
         url={render.shown}
+        canvas={render.canvas}
         waiting={!!(s.file && film)}
         busy={render.busy}
         comparing={render.comparing}

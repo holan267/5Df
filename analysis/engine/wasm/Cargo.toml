@@ -1,0 +1,12 @@
+[package]
+name = "latent-engine"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "latent_engine"
+crate-type = ["staticlib"]
+
+[dependencies]
+latent-core = { path = "../core" }
+serde_json = "1"

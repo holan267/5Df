@@ -22,8 +22,8 @@ paper<i>.bin, after inflating:
   u32 n_over, u32 over[n_over], u8 zz[k * 3 * n * n * n]
 zz is ordered [basis][channel][z][y][x]. Each channel is q = round(y / delta), stored as
 its 3D Lorenzo residual (first difference along each axis) in zigzag form; zz == 255
-takes the next value of over instead. Decoding is three cumsums, so it needs no
-per-node Python and is fast in Pyodide.
+takes the next value of over instead. Decoding is three cumsums. analysis/engine/core/src/lite.rs
+reads these files too, so a change to the format goes in both.
 
 grain<i>.bin: one byte, 1 for 8-bit table blocks and 0 for lattice blocks, then zlib.
   Table blocks: u8 [push][byte], first difference along push.

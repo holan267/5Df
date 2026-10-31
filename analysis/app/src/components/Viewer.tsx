@@ -1,10 +1,11 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "cn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 interface Props {
   url: string | null;
+  canvas: HTMLCanvasElement | null;     // the live preview, when the GPU draws it
   waiting: boolean;     // a file is picked, its first render is on the way
   busy: boolean;
   comparing: boolean;
@@ -16,17 +17,29 @@ interface Props {
 
 const overlay = "border border-white/15 bg-black/65 text-foreground hover:border-white/30 hover:bg-black/65";
 
-export function Viewer({ url, waiting, busy, comparing, zoomed, onZoom, onCompare, children }: Props) {
+// The worker draws on this element, so it is moved into the page rather than rendered.
+function Live({ canvas, className, onClick }: { canvas: HTMLCanvasElement; className: string; onClick(): void }) {
+  const slot = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    slot.current?.append(canvas);
+    return () => { canvas.remove(); };
+  }, [canvas]);
+  useEffect(() => {
+    canvas.className = className;
+    canvas.onclick = onClick;
+  }, [canvas, className, onClick]);
+  return <div ref={slot} className="contents" />;
+}
+
+export function Viewer({ url, canvas, waiting, busy, comparing, zoomed, onZoom, onCompare, children }: Props) {
+  const picture = cn("block max-h-full max-w-full cursor-zoom-in shadow-[0_2px_24px_#0008]", zoomed && "max-h-none max-w-none cursor-zoom-out");
   return (
     <main className="relative overflow-hidden bg-viewer [grid-area:view]">
       <div className={cn("absolute inset-0 grid place-items-center overflow-auto p-4", zoomed && "place-items-start p-0")}>
-        {url ? (
-          <img
-            src={url}
-            alt="Preview"
-            onClick={onZoom}
-            className={cn("block max-h-full max-w-full cursor-zoom-in shadow-[0_2px_24px_#0008]", zoomed && "max-h-none max-w-none cursor-zoom-out")}
-          />
+        {canvas ? (
+          <Live canvas={canvas} className={picture} onClick={onZoom} />
+        ) : url ? (
+          <img src={url} alt="Preview" onClick={onZoom} className={picture} />
         ) : (
           <div className="text-center text-faint">{waiting ? "Developing…" : "Pick a raw file on the left"}</div>
         )}

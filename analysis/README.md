@@ -26,8 +26,8 @@ Toàn bộ là **phân tích tĩnh**: không chạy code trên máy ảnh. Mỗi
 | `tools/latent_develop.py` | Tráng CR2 của 5D (và raw máy khác như Sony `.ARW`, mục 6.1) thành JPG với profile film (P400, V050…) |
 | `tools/latent_effects.py` | Grain (nhiễu tất định + lưới 17³ / bảng 8 bit) và halation |
 | `tools/latent_traits.py` | Đo tính chất từng film từ cube (tương phản, shadow, highlight, độ bão hòa, ám màu) và sinh mô tả (mục 6.3) |
-| `app/latent_app.py`, `app/src/` | Giao diện web (React, Vite, shadcn/ui) để xem trước và export, dùng `latent_develop.py` làm backend (mục 6.2); `npm run build` trong `app/` trước khi chạy |
-| `app/web/`, `app/public/` | Cùng giao diện đó chạy hẳn trong trình duyệt, không cần Python: Pyodide + LibRaw‑Wasm (mục 6.2.1) |
+| `app/src/`, `app/public/` | Giao diện web (React, Vite, shadcn/ui) để xem trước và export, chạy hẳn trong trình duyệt (mục 6.2) |
+| `engine/` | Pipeline Rust + LibRaw thành một module WebAssembly, phần theo từng pixel chạy trên WebGPU (mục 6.2) |
 | `samples/` | Cube mẫu: P400, 5000 K, push 0, giấy #0 |
 
 ### Tạo lại kết quả Ghidra
@@ -392,36 +392,22 @@ Còn sai khác so với máy ảnh vì `.cube` xuất ra không chứa:
 
 Hiệu năng: bản Python giải nén một cube trong khoảng 1 giây.
 
-### 6.2 Giao diện xem trước trên trình duyệt (`app/latent_app.py`)
-
-```sh
-uv run analysis/app/latent_app.py              # mở http://127.0.0.1:8765
-#   --dir FOLDER    thư mục chứa .CR2 hiện trong danh sách (mặc định: gốc repo)
-#   --port N        cổng (mặc định 8765)
-#   --host ADDR     địa chỉ bind (mặc định 127.0.0.1, chỉ máy này truy cập được)
-#   --upload-dir D  nơi lưu file kéo thả vào trang (mặc định: thư mục tạm)
-#   --no-browser    không tự mở trình duyệt
-```
-
-- Backend là `latent_develop.py`. Server chỉ dùng thư viện chuẩn của Python, cộng thêm `numpy`, `rawpy`, `pillow` như CLI. Chạy được trên macOS, Windows và Linux, chỉ cần `uv`.
-- Có thể chỉnh: film (nhóm theo loại), phơi sáng (±5 EV, như `--exposure` của CLI), giấy/phim in, push/pull, grade giấy B&W, ánh sáng (theo WB lúc chụp hoặc Kelvin), grain, nén gamut, halation (D250/T500), seed grain, chất lượng JPEG.
-- Xem trước ở ¼ cỡ (1092×728, khoảng 1 giây khi đã cache), ½ cỡ hoặc cỡ đầy đủ. Grain được sinh theo từng pixel đầu ra, nên chỉ ở cỡ đầy đủ hạt mới giống của máy.
-- Nút **Export** luôn tráng ở cỡ đầy đủ. Kết quả trùng từng pixel với CLI khi cùng tham số (đã thử `IMG_0004.CR2 D250 --kelvin 5700`).
-- Server cache những bước không phụ thuộc thanh trượt: raw đã demosaic, cube đã giải nén, khối grain, nhiễu, bản đồ halation. Nếu một lượt preview mới đến khi lượt cũ còn chờ, lượt cũ bị bỏ.
-- Phơi sáng nhân vào ma trận camera, tức là trên raw tuyến tính sau khi cắt ở mức bão hòa cảm biến: tăng EV kéo được vùng tối lên (vượt 1.0 thì đi qua shaper và nén gamut của film), giảm EV làm tối ảnh nhưng vùng cảm biến đã cháy vẫn cháy. Bản đồ halation cũng tính theo phơi sáng mới.
-- Phím tắt: `[` `]` đổi film, `-` `=` giảm/tăng phơi sáng ⅓ stop, `0` về 0 EV, `Z` chuyển giữa vừa khung và 100%, giữ `C` để so với lần tráng trước.
-- Trỏ chuột (hoặc focus bàn phím) vào mã film để xem mô tả (mục 6.3): tên đầy đủ, tag, đường cong tone, thanh điểm. Lần chạy đầu server đo cả 20 film trong nền (khoảng 30 giây), sau đó đọc lại từ `latent_traits_<hash>.json` trong thư mục tạm của hệ thống.
-- **Không host công khai.** App cần `AUTOEXEC.BIN` (chứa khóa) và các pack `LATENT/*.LTP` của Latent Studios. Nếu muốn dùng từ máy khác, chạy `--host 0.0.0.0` trong mạng riêng hoặc qua VPN (ví dụ Tailscale). App không có đăng nhập.
-
-#### 6.2.1 Không cần Python: chạy trong trình duyệt (`app/web/`)
+### 6.2 Giao diện xem trước trên trình duyệt (`app/`, `engine/`)
 
 ```sh
 cd analysis/app && npm install && npm run dev  # hoặc npm run build, rồi đưa dist/ lên server tĩnh
 ```
 
-Trang chạy nguyên code Python ở trên trong Pyodide (WebAssembly), và dùng LibRaw‑Wasm thay cho rawpy. Có `public/LATENT_LITE/` thì trang mở thẳng vào lite pack (mục 6.4). Nếu không, người dùng chọn thư mục kit (`AUTOEXEC.BIN` + pack) ngay trong trình duyệt; file được đọc tại chỗ, không upload đi đâu.
-
-Ảnh tráng ra trùng với bản Python trước bước JPEG (sai khác ±1 do làm tròn). File JPEG thì khác đôi chút vì Pyodide dùng libjpeg 9. Preview chậm hơn khoảng 1,5–2 lần, export cỡ đầy đủ mất khoảng 1,5 phút. Cách chạy, số đo và giới hạn: [app/web/README.md](app/web/README.md).
+- Không cần Python. Trang chạy pipeline Rust + LibRaw trong WebAssembly, phần theo từng pixel chạy trên WebGPU. Không có WebGPU thì trang dùng đường CPU, chậm hơn khi kéo thanh trượt. `analysis/tools/*.py` vẫn là chuẩn đối chiếu; ảnh tráng ra lệch ±1 ở khoảng 0,0005% giá trị. Cách build, số đo và giới hạn: [engine/README.md](engine/README.md).
+- Có `public/LATENT_LITE/` thì trang mở thẳng vào lite pack (mục 6.4). Nếu không, người dùng chọn một thư mục `LATENT_LITE` ngay trong trình duyệt; file được đọc tại chỗ, không upload đi đâu. Kit `.LTP` chỉ dùng được với CLI.
+- Có thể chỉnh: film (nhóm theo loại), phơi sáng (±5 EV, như `--exposure` của CLI), giấy/phim in, push/pull, grade giấy B&W, ánh sáng (theo WB lúc chụp hoặc Kelvin), grain, nén gamut, halation (D250/T500), seed grain, chất lượng JPEG.
+- Xem trước ở ¼ cỡ (1092×728), ½ cỡ hoặc cỡ đầy đủ. Grain được sinh theo từng pixel đầu ra, nên chỉ ở cỡ đầy đủ hạt mới giống của máy.
+- Nút **Export** luôn tráng ở cỡ đầy đủ.
+- Engine cache những bước không phụ thuộc thanh trượt: raw đã demosaic, cube đã dựng, khối grain, nhiễu, bản đồ halation. Nếu một lượt preview mới đến khi lượt cũ còn chờ, lượt cũ bị bỏ.
+- Phơi sáng nhân vào ma trận camera, tức là trên raw tuyến tính sau khi cắt ở mức bão hòa cảm biến: tăng EV kéo được vùng tối lên (vượt 1.0 thì đi qua shaper và nén gamut của film), giảm EV làm tối ảnh nhưng vùng cảm biến đã cháy vẫn cháy. Bản đồ halation cũng tính theo phơi sáng mới.
+- Phím tắt: `[` `]` đổi film, `-` `=` giảm/tăng phơi sáng ⅓ stop, `0` về 0 EV, `Z` chuyển giữa vừa khung và 100%, giữ `C` để so với lần tráng trước.
+- Trỏ chuột (hoặc focus bàn phím) vào mã film để xem mô tả (mục 6.3): tên đầy đủ, tag, đường cong tone, thanh điểm. Mô tả đọc từ `traits.json` đi kèm lite pack.
+- **Trước khi host công khai**, đọc phần "Khi đưa lên mạng" trong [engine/README.md](engine/README.md): `dist/` chứa dữ liệu film đã giải mã của Latent Studios.
 
 ### 6.3 Mô tả tính chất film từ cube (`tools/latent_traits.py`)
 
@@ -442,7 +428,6 @@ uv run analysis/tools/latent_traits.py [P400 V050 ...] [--json out.json]
 ```sh
 uv run analysis/tools/latent_lite_build.py [P400 V050 ...] [--out analysis/app/public/LATENT_LITE] [--jobs 2]
 uv run analysis/tools/latent_lite_build.py --keep-cubes      # giữ paper<i>.bin đã có, làm lại phần còn lại
-uv run analysis/app/latent_app.py --latent-dir analysis/app/public/LATENT_LITE --autoexec analysis/app/public/LATENT_LITE/firmware.bin
 ```
 
 - `.LTP` gồm 99,3% là cube LTZ1 đã nén sẵn (khoảng 205 KB mỗi cube, không có khoảng trống), nhưng có tới 19.412 cube. Xuất text sẽ nặng hơn: mỗi `.cube` khoảng 7,2 MB, cả bộ khoảng 144 GB.
@@ -451,8 +436,7 @@ uv run analysis/app/latent_app.py --latent-dir analysis/app/public/LATENT_LITE -
 - Cube của lite pack **có mất mát**. So với `.LTP` qua `develop()`, trước JPEG, không grain, 248 look trên 20 film, ảnh `IMG_0002.jpg` đã bỏ sRGB: lệch trung bình 0,12–0,30 mức trên thang 8-bit, ít nhất 99,86% giá trị lệch ≤ 2 mức, lệch lớn nhất 10 mức. Quét đều khối màu cho lệch lớn nhất 13 mức, ở màu rất bão hòa. V050 và F100 lệch nhiều nhất (khoảng 70 paper trong bộ dừng ở hạng 10×10, trần `MAX_BASIS`). Trên `IMG_0002.CR2` thật, qua cả pipeline rồi JPEG chất lượng 100, 8 look lệch trung bình 0,42–0,61 mức, tối đa 8 mức.
 - Grain **không mất mát**: 1.507 khối của mọi `GRAIN.LTG` khớp từng byte. 98 MB còn 40 MB, nhờ lấy sai phân lattice theo 3 trục và theo push, rồi tách byte thấp và byte cao trước zlib. Mỗi `grain<i>.bin` chứa mọi push của paper i, nhiều nhất 0,42 MB.
 - `firmware.bin` thay `AUTOEXEC.BIN`: cùng độ dài với payload, chỉ giữ các bảng mà `firmware_ranges` liệt kê (3.337 byte khác 0), phần còn lại là số 0, nên không có code cũng không có khóa. Builder dừng nếu một bảng chạm vùng khóa. Danh mục, ma trận màu, noise grain và thông số halation đều khớp với `AUTOEXEC.BIN`.
-- `traits.json` là mô tả film đo sẵn trên chính lite pack; `index.json` liệt kê từng file với cỡ và CRC32 để trang tải qua HTTP (`app/web/README.md`).
-- `Studio` dùng lite pack khi `<latent-dir>/<CODE>/film.json` tồn tại và không có `<CODE>.LTP`.
+- `traits.json` là mô tả film đo sẵn trên chính lite pack; `index.json` liệt kê từng file với cỡ và CRC32 để trang tải qua HTTP (`engine/README.md`).
 - Giải mã một paper mất khoảng 1 giây, sau đó khoảng 0,06 giây mỗi cube (bản native), so với 7–9 giây mỗi cube LTZ1 khi giải mã bằng Python. Chỉ một paper được giữ ở dạng đã giải mã, trên mọi pack, vì mỗi paper tốn tới 330 MB.
 - Builder cần khoảng 1,5 GB commit cho mỗi film chạy song song. `LATENT_LITE/` là dữ liệu đã giải mã và nằm trong `.gitignore`.
 

@@ -15,6 +15,7 @@ interface Args {
 
 export function useRender({ s, film, files, backend, generation, uploads, setStatus }: Args) {
   const [urls, setUrls] = useState<{ current: string | null; previous: string | null }>({ current: null, previous: null });
+  const [renders, setRenders] = useState(0);             // on the canvas, which keeps its own previous one
   const [info, setInfo] = useState<RenderInfo | null>(null);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -37,11 +38,15 @@ export function useRender({ s, film, files, backend, generation, uploads, setSta
       try {
         const r = await backend.render(preview, false, mine.signal);
         if (!r) return;                         // superseded by a newer request
-        const url = URL.createObjectURL(r.blob);
-        setUrls(({ current, previous }) => {
-          if (previous && previous !== current) URL.revokeObjectURL(previous);
-          return { current: url, previous: current };
-        });
+        if (r.blob) {
+          const url = URL.createObjectURL(r.blob);
+          setUrls(({ current, previous }) => {
+            if (previous && previous !== current) URL.revokeObjectURL(previous);
+            return { current: url, previous: current };
+          });
+        } else {
+          setRenders((n) => n + 1);
+        }
         setInfo(r.info);
         const f = files.find((x) => x.id === s.file);
         setTitle(f ? `${f.name} — ${s.film}, ${film.papers[s.paper].name}` : "");
@@ -51,7 +56,7 @@ export function useRender({ s, film, files, backend, generation, uploads, setSta
       } finally {
         if (ctrl.current === mine) setBusy(false);
       }
-    }, 120);
+    }, backend.canvas ? 16 : 120);
     return () => clearTimeout(timer);
   }, [preview, generation, uploads, backend]);
 
@@ -60,7 +65,7 @@ export function useRender({ s, film, files, backend, generation, uploads, setSta
     setExporting(true);
     try {
       const r = await backend.render(query(s, film, { scale: 1, quality: s.quality }), true);
-      if (!r) return;
+      if (!r?.blob) return;
       const a = document.createElement("a");
       a.href = URL.createObjectURL(r.blob); a.download = r.name; a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -72,8 +77,12 @@ export function useRender({ s, film, files, backend, generation, uploads, setSta
     }
   }
 
-  const compare = (on: boolean) => setComparing(on && !!urls.previous);
+  const live = !!backend.canvas && renders > 0;
+  const compare = (on: boolean) => {
+    if (live && renders > 1 && (on || comparing)) backend.showPrevious?.(on);
+    setComparing(on && (live ? renders > 1 : !!urls.previous));
+  };
   const shown = comparing && urls.previous ? urls.previous : urls.current;
 
-  return { shown, comparing, info, title, busy, exporting, compare, exportJpg };
+  return { shown, canvas: live ? backend.canvas! : null, comparing, info, title, busy, exporting, compare, exportJpg };
 }

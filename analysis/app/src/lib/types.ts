@@ -44,7 +44,8 @@ export interface Trait {
 export type Traits = Record<string, Trait>;
 export interface TraitsReply { ready: boolean; error?: string | null; films?: Traits }
 
-export interface Rendered { blob: Blob; info: RenderInfo; name: string }
+/** blob is null when the picture went straight to the backend's canvas. */
+export interface Rendered { blob: Blob | null; info: RenderInfo; name: string }
 
 export interface Backend {
   files(): Promise<RawFile[]>;
@@ -52,10 +53,13 @@ export interface Backend {
   thumb(id: string): Promise<string>;
   upload(file: File): Promise<string>;
   render(query: string, download: boolean, signal?: AbortSignal): Promise<Rendered | null>;
+  /** Live previews: the canvas they land on, and how to show the render before the last. */
+  canvas?: HTMLCanvasElement | null;
+  showPrevious?(on: boolean): void;
 }
 
 export interface KitFile { path: string; file: File }
-export interface Started { films: Film[]; files: RawFile[] }
+export interface Started { films: Film[]; files: RawFile[]; gpu?: boolean }
 
 // File System Access API, Chrome and Edge only.
 export interface DirectoryHandle extends FileSystemDirectoryHandle {

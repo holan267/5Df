@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch } from "react";
-import { http } from "@/lib/backend/http";
-import { wasm } from "@/lib/backend/wasm";
+import { engine } from "@/lib/backend/engine";
 import { idb } from "@/lib/idb";
-import { fromInput, isolate, RAW_FILE, walk } from "@/lib/kit";
+import { fromInput, RAW_FILE, walk } from "@/lib/kit";
 import type { Backend, DirectoryHandle, Film, KitFile, RawFile, Started, Traits } from "@/lib/types";
 import type { Action } from "@/hooks/useSettings";
 
@@ -11,25 +10,24 @@ export interface KitState {
   note: string;
   err: boolean;
   busy: boolean;       // a kit is loading
-  blocked: boolean;    // no cross-origin isolation, nothing can start
   button: boolean;     // the header's Kit… button
   reopen: DirectoryHandle | null;
 }
 
 export interface Status { text: string; err: boolean }
 
-// StrictMode runs effects twice; a second start would be a second Pyodide.
+// StrictMode runs effects twice; a second start would be a second engine.
 let booted = false;
 
 export function useSession(dispatch: Dispatch<Action>) {
-  const [backend, setBackend] = useState<Backend>(http);
+  const [backend, setBackend] = useState<Backend>(engine);
   const [films, setFilms] = useState<Film[]>([]);
   const [files, setFiles] = useState<RawFile[]>([]);
   const [traits, setTraits] = useState<Traits | null>(null);
   const [generation, setGeneration] = useState(0);        // +1 per kit opened
   const [uploads, setUploads] = useState(0);
   const [status, setStatusState] = useState<Status>({ text: "loading…", err: false });
-  const [kit, setKit] = useState<KitState>({ open: false, note: "", err: false, busy: false, blocked: false, button: false, reopen: null });
+  const [kit, setKit] = useState<KitState>({ open: false, note: "", err: false, busy: false, button: false, reopen: null });
 
   const setStatus = useCallback((text: string, err = false) => setStatusState({ text, err }), []);
 
@@ -57,12 +55,12 @@ export function useSession(dispatch: Dispatch<Action>) {
     }
 
     async function openKit(list: KitFile[], label: string) {
-      setKit((k) => ({ ...k, busy: true, open: true, note: "Loading Python and LibRaw (first visit downloads about 20 MB)…", err: false }));
+      setKit((k) => ({ ...k, busy: true, open: true, note: "Loading the engine…", err: false }));
       setStatus("starting…");
       try {
-        const r = await wasm.start(list);
+        const r = await engine.start(list);
         setKit((k) => ({ ...k, open: false, button: true }));
-        started(wasm, r, label);
+        started(engine, r, label);
       } catch (e) {
         const message = (e as Error).message;
         kitPanel(message, true);
@@ -96,21 +94,13 @@ export function useSession(dispatch: Dispatch<Action>) {
       setKit((k) => (k.open ? { ...k, open: !hasFilms } : { ...k, open: true, note: "", err: false }));
     }
 
-    async function startWasm() {
-      if (!(await isolate())) {
-        kitPanel("This page needs cross-origin isolation (for LibRaw's SharedArrayBuffer). Open it from " +
-                 "http://localhost or https, in a browser with service workers, or serve it with the headers " +
-                 "Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: require-corp.", true);
-        setKit((k) => ({ ...k, blocked: true }));
-        setStatus("not cross-origin isolated", true);
-        return;
-      }
-      setBackend(() => wasm);
+    async function boot() {
+      setBackend(() => engine);
       setStatus("choose a kit folder");
       const handle = await idb.get<DirectoryHandle>("kit-handle");
       const granted = handle && handle.queryPermission && (await handle.queryPermission({ mode: "read" })) === "granted";
       // Lite packs on the server need no folder; the last one picked still gives its raws.
-      if (await wasm.detectLite()) return openKit(granted ? (await walk(handle)).filter((k) => RAW_FILE.test(k.path)) : [], "lite packs");
+      if (await engine.detectLite()) return openKit(granted ? (await walk(handle)).filter((k) => RAW_FILE.test(k.path)) : [], "lite packs");
       if (handle) {
         if (granted) {
           kitPanel("Reading " + handle.name + "…");
@@ -121,33 +111,28 @@ export function useSession(dispatch: Dispatch<Action>) {
       kitPanel();
     }
 
-    async function boot() {
-      // Under latent_app.py the API answers; on a static server it is a 404 (or an HTML page).
-      let r: Started | null = null;
-      try { r = await http.start(); } catch { /* static server */ }
-      if (r) started(http, r);
-      else startWasm().catch((e) => setStatus(e.message, true));
-    }
-
     return { boot, chooseKit, reopenKit, kitFromInput, toggleKit };
   }, [dispatch, setStatus]);
 
   useEffect(() => {
-    wasm.onStatus = setStatus;
+    engine.onStatus = setStatus;
     if (booted) return;
     booted = true;
-    actions.boot();
+    actions.boot().catch((e) => setStatus(e.message, true));
   }, [actions, setStatus]);
 
   async function upload(list: File[]) {
     if (!films.length) return;      // no kit open yet
+    let added = false;
     for (const f of list) {
       setStatus("adding " + f.name + "…");
       try {
         const id = await backend.upload(f);
         dispatch({ type: "patch", patch: { file: id } });
+        added = true;
       } catch (e) { setStatus((e as Error).message, true); }
     }
+    if (!added) return;     // a new render would write over the error
     setFiles(await backend.files());
     setUploads((n) => n + 1);
   }
