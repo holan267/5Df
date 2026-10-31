@@ -80,18 +80,21 @@ def grain_noise(payload, seed, height, width, streams):
     return np.stack(planes)
 
 
+def read_grain_block(pack_path, key, grade_i, push_i):
+    import latent_crypt
+    nonce = latent_crypt.make_nonce("ltg", pack_path)
+    with open(pack_path, "rb") as f:
+        head = latent_crypt.keystream_xor(key, nonce, 0, f.read(0x30))
+        if head[:8] != b"LTGPACK1":
+            raise ValueError("not an LTGPACK1 file")
+        n_grade, n_push = struct.unpack_from("<2I", head, 8)
+        off = 0x30 + (grade_i * n_push + push_i) * GRAIN_BLOCK
+        f.seek(off)
+        return latent_crypt.keystream_xor(key, nonce, off, f.read(GRAIN_BLOCK))
+
+
 class Grain:
-    def __init__(self, pack_path, key, grade_i, push_i, level):
-        import latent_crypt
-        nonce = latent_crypt.make_nonce("ltg", pack_path)
-        with open(pack_path, "rb") as f:
-            head = latent_crypt.keystream_xor(key, nonce, 0, f.read(0x30))
-            if head[:8] != b"LTGPACK1":
-                raise ValueError("not an LTGPACK1 file")
-            n_grade, n_push = struct.unpack_from("<2I", head, 8)
-            off = 0x30 + (grade_i * n_push + push_i) * GRAIN_BLOCK
-            f.seek(off)
-            blk = latent_crypt.keystream_xor(key, nonce, off, f.read(GRAIN_BLOCK))
+    def __init__(self, blk, level):
         if blk[:8] != b"LTGRAIN4":
             raise ValueError("bad LTGRAIN4 block")
         flags = blk[8]

@@ -1,4 +1,5 @@
 *.ARW
 *.CR2
 LATENT/
+LATENT_LITE/
 .DS_Store

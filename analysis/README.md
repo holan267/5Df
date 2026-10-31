@@ -437,6 +437,25 @@ uv run analysis/tools/latent_traits.py [P400 V050 ...] [--json out.json]
 - Chữ mô tả và thanh điểm (−2..2) là **tương đối so với các film trong `LATENT/`**: 1 đơn vị bằng độ phân tán của bộ film (1.4826 × MAD). Lệch hue và màu nổi bật so với trung vị của từng nhóm, vì cách render sRGB tham chiếu khiến film nào cũng lệch giống nhau. Riêng ám màu (balance) là giá trị tuyệt đối.
 - Một số kết quả đáng chú ý: âm bản (Portra, Ektar, Superia) có tương phản trung tông cao hơn hẳn slide và film điện ảnh nhưng highlight chạm trắng sớm (≈ +1.2..+1.6 stop). Vision3 có latitude highlight dài nhất (≈ +2.5 stop) và màu nhạt nhất. Velvia bão hòa nhất. Slide trên "Light box" có điểm trắng chỉ khoảng 200/255. Film B&W có đen bị nâng (giấy Multigrade), tương phản thấp.
 
+### 6.4 Lite pack: bản nhẹ của `.LTP` và `GRAIN.LTG` (`tools/latent_lite.py`, `tools/latent_lite_build.py`)
+
+```sh
+uv run analysis/tools/latent_lite_build.py [P400 V050 ...] [--out LATENT_LITE] [--jobs 2]
+uv run analysis/tools/latent_lite_build.py --keep-cubes      # giữ paper<i>.bin đã có, làm lại phần còn lại
+uv run analysis/app/latent_app.py --latent-dir LATENT_LITE --autoexec LATENT_LITE/firmware.bin
+```
+
+- `.LTP` gồm 99,3% là cube LTZ1 đã nén sẵn (khoảng 205 KB mỗi cube, không có khoảng trống), nhưng có tới 19.412 cube. Xuất text sẽ nặng hơn: mỗi `.cube` khoảng 7,2 MB, cả bộ khoảng 144 GB.
+- Phần thừa nằm giữa các cube: trong một paper, cube gần như là hàm hạng thấp của push và nhiệt độ màu. Mỗi paper chỉ giữ các cube cơ sở, cộng trọng số trong `film.json`; định dạng ghi ở đầu `latent_lite.py`. Paper thì giữ riêng hết, vì mỗi paper là một màu khác hẳn.
+- Kết quả: 3,57 GB (`.LTP` 3,47 GB, `GRAIN.LTG` 98 MB) còn 533 MB; `paper<i>.bin` từ 0,4 đến khoảng 8 MB; `curves.bin` (LTVC) giảm khoảng 94%, không mất dữ liệu.
+- Cube của lite pack **có mất mát**. So với `.LTP` qua `develop()`, trước JPEG, không grain, 248 look trên 20 film, ảnh `IMG_0002.jpg` đã bỏ sRGB: lệch trung bình 0,12–0,30 mức trên thang 8-bit, ít nhất 99,86% giá trị lệch ≤ 2 mức, lệch lớn nhất 10 mức. Quét đều khối màu cho lệch lớn nhất 13 mức, ở màu rất bão hòa. V050 và F100 lệch nhiều nhất (khoảng 70 paper trong bộ dừng ở hạng 10×10, trần `MAX_BASIS`). Trên `IMG_0002.CR2` thật, qua cả pipeline rồi JPEG chất lượng 100, 8 look lệch trung bình 0,42–0,61 mức, tối đa 8 mức.
+- Grain **không mất mát**: 1.507 khối của mọi `GRAIN.LTG` khớp từng byte. 98 MB còn 40 MB, nhờ lấy sai phân lattice theo 3 trục và theo push, rồi tách byte thấp và byte cao trước zlib. Mỗi `grain<i>.bin` chứa mọi push của paper i, nhiều nhất 0,42 MB.
+- `firmware.bin` thay `AUTOEXEC.BIN`: cùng độ dài với payload, chỉ giữ các bảng mà `firmware_ranges` liệt kê (3.337 byte khác 0), phần còn lại là số 0, nên không có code cũng không có khóa. Builder dừng nếu một bảng chạm vùng khóa. Danh mục, ma trận màu, noise grain và thông số halation đều khớp với `AUTOEXEC.BIN`.
+- `traits.json` là mô tả film đo sẵn trên chính lite pack; `index.json` liệt kê từng file với cỡ và CRC32 để trang tải qua HTTP (`app/web/README.md`).
+- `Studio` dùng lite pack khi `<latent-dir>/<CODE>/film.json` tồn tại và không có `<CODE>.LTP`.
+- Giải mã một paper mất khoảng 1 giây, sau đó khoảng 0,06 giây mỗi cube (bản native), so với 7–9 giây mỗi cube LTZ1 khi giải mã bằng Python. Chỉ một paper được giữ ở dạng đã giải mã, trên mọi pack, vì mỗi paper tốn tới 330 MB.
+- Builder cần khoảng 1,5 GB commit cho mỗi film chạy song song. `LATENT_LITE/` là dữ liệu đã giải mã và nằm trong `.gitignore`.
+
 ## 7. Còn chưa rõ
 
 - Ý nghĩa của 8000/31250 trong header (firmware chỉ kiểm tra bằng; cũng được ghi vào header `LTCUBE2` mà nó tự dựng trong RAM).

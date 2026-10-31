@@ -5,6 +5,8 @@
 // The kit (AUTOEXEC.BIN, LATENT/*.LTP, LATENT/<code>/GRAIN.LTG, raws next to them) is the
 // user's own and never leaves the machine: the files are mounted read-only with WORKERFS,
 // which reads only the slices Python asks for, so multi-GB packs cost no memory.
+// A LATENT_LITE folder (tools/latent_lite.py) mounts the same way. Lite packs can also come
+// from a URL: see mountLite.
 import { loadPyodide } from "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pyodide.mjs";
 import LibRawModule from "./vendor/libraw-wasm/libraw.js";
 
@@ -14,13 +16,13 @@ const SOURCES = {
   "/analysis/app/latent_app.py": "../latent_app.py",
   "/analysis/app/web/rawpy.py": "rawpy.py",
   "/analysis/app/web/latent_web.py": "latent_web.py",
-  ...Object.fromEntries(["color", "crypt", "develop", "effects", "ltp", "traits"].map(
+  ...Object.fromEntries(["color", "crypt", "develop", "effects", "lite", "ltp", "traits"].map(
     (m) => [`/analysis/tools/latent_${m}.py`, `../../tools/latent_${m}.py`])),
 };
-const KIT = "/kit", RAWS = "/raws", UPLOADS = "/uploads";
+const KIT = "/kit", LITE = "/lite", RAWS = "/raws", UPLOADS = "/uploads";
 const RAW_RE = /\.(cr2|arw)$/i;
 
-let py = null, web = null;
+let py = null, web = null, lite = null;
 
 async function boot() {
   const [pyodide, libraw] = await Promise.all([loadPyodide(), LibRawModule()]);
@@ -43,8 +45,14 @@ async function boot() {
   web = pyodide.pyimport("latent_web");
 }
 
-// kit: [{path, file}] with paths relative to the folder the user picked.
-function mountKit(kit) {
+// Shallowest of the kit paths with this file name.
+function findKit(kit, re) {
+  return kit.map((k) => k.path).filter((p) => re.test(p)).sort((a, b) => a.split("/").length - b.split("/").length)[0];
+}
+
+// kit: [{path, file}] with paths relative to the folder the user picked. Returns where the
+// packs are, or null when the folder has none and the page has lite packs at a URL.
+function mountKit(kit, hasUrl) {
   const FS = py.FS;
   if (!FS.filesystems.WORKERFS) throw new Error("this Pyodide build has no WORKERFS");
   FS.mkdirTree(KIT);
@@ -57,15 +65,69 @@ function mountKit(kit) {
     const name = path.slice(path.lastIndexOf("/") + 1);
     if (RAW_RE.test(name) && !seen.has(name)) { seen.add(name); FS.symlink(`${KIT}/${path}`, `${RAWS}/${name}`); }
   }
-  const autoexec = kit.map((k) => k.path).filter((p) => /(^|\/)AUTOEXEC\.BIN$/i.test(p))
-    .sort((a, b) => a.split("/").length - b.split("/").length)[0];
-  if (!autoexec) throw new Error("no AUTOEXEC.BIN in the chosen folder");
+  const autoexec = findKit(kit, /(^|\/)AUTOEXEC\.BIN$/i);
   // The packs folder is the one holding the most .LTP files.
   const dirs = {};
   for (const { path } of kit) if (/\.LTP$/i.test(path)) { const d = path.slice(0, path.lastIndexOf("/") + 1); dirs[d] = (dirs[d] || 0) + 1; }
   const latent = Object.keys(dirs).sort((a, b) => dirs[b] - dirs[a])[0];
-  if (latent === undefined) throw new Error("no .LTP film packs in the chosen folder");
-  return { autoexec: `${KIT}/${autoexec}`, latent: `${KIT}/${latent}`.replace(/\/$/, "") };
+  if (autoexec && latent !== undefined) return { autoexec: `${KIT}/${autoexec}`, latent: `${KIT}/${latent}`.replace(/\/$/, "") };
+  const firmware = findKit(kit, /(^|\/)firmware\.bin$/);
+  if (firmware) return { autoexec: `${KIT}/${firmware}`, latent: `${KIT}/${firmware}`.replace(/\/firmware\.bin$/, "") };
+  if (hasUrl) return null;
+  throw new Error(autoexec ? "no .LTP film packs in the chosen folder" : "no AUTOEXEC.BIN or LATENT_LITE packs in the chosen folder");
+}
+
+// Lite packs over HTTP: firmware.bin and every film.json now, the rest when Python misses
+// it (see withLite), so a session downloads only the papers it uses. Cache Storage keeps
+// the files between visits; ?v=crc in the URL drops them when a pack is rebuilt.
+async function mountLite(base) {
+  const r = await fetch(base + "index.json", { cache: "no-cache" });
+  if (!r.ok) throw new Error(`${base}index.json: ${r.status}`);
+  const { files } = await r.json();
+  // The cache only saves downloads: without one (it can fail to open) everything still works.
+  const cache = await caches.open("latent-lite " + base).catch(() => null);
+  lite = { base, files, cache };
+  const current = new Set(Object.keys(files).map(liteUrl));
+  if (cache) for (const req of await cache.keys()) if (!current.has(req.url)) cache.delete(req);
+  await Promise.all(Object.keys(files).filter((p) => /(^|\/)(firmware\.bin|film\.json)$/.test(p)).map(fetchLite));
+  return { autoexec: `${LITE}/firmware.bin`, latent: LITE };
+}
+
+function liteUrl(path) { return `${lite.base}${path}?v=${lite.files[path][1]}`; }
+
+async function fetchLite(path) {
+  if (!lite.files[path]) throw new Error(`${path} is not in ${lite.base}index.json`);
+  const url = liteUrl(path);
+  let r = lite.cache && await lite.cache.match(url);
+  if (!r) {
+    const size = lite.files[path][0];
+    if (size > 1 << 20) self.postMessage({ status: `downloading ${path} (${(size / 1e6).toFixed(1)} MB)…` });
+    r = await fetch(url);
+    if (!r.ok) throw new Error(`${url}: ${r.status}`);
+    if (lite.cache) await lite.cache.put(url, r.clone()).catch(() => {});   // out of quota: it still works this once
+  }
+  const file = `${LITE}/${path}`;
+  py.FS.mkdirTree(file.slice(0, file.lastIndexOf("/")));
+  py.FS.writeFile(file, new Uint8Array(await r.arrayBuffer()));
+  return file;
+}
+
+// A Python call that stops on a lite file it does not have yet: fetch it, call again.
+// Python keeps what it decodes, so the files only stay in memory for the call.
+async function withLite(fn, ...args) {
+  const fetched = [];
+  try {
+    for (;;) {
+      const r = fn(...args);
+      if (r.need === undefined) {
+        if (r.error !== undefined) throw new Error(r.error);
+        return r.ok;
+      }
+      fetched.push(await fetchLite(r.need.slice(LITE.length + 1)));
+    }
+  } finally {
+    for (const f of fetched) py.FS.unlink(f);
+  }
 }
 
 function call(fn, ...args) {
@@ -75,9 +137,9 @@ function call(fn, ...args) {
 }
 
 const ops = {
-  async init({ kit, role }) {
+  async init({ kit, liteUrl: url, role }) {
     await boot();
-    const { autoexec, latent } = mountKit(kit);
+    const { autoexec, latent } = mountKit(kit, !!url) || await mountLite(url);
     if (role === "traits") return JSON.parse(call(web.traits, autoexec, latent));
     const r = call(web.start, autoexec, latent, RAWS, UPLOADS);
     return { films: JSON.parse(r.films), files: JSON.parse(r.files) };
@@ -85,8 +147,8 @@ const ops = {
   files: () => JSON.parse(call(web.files)),
   thumb: ({ file }) => call(web.thumb, file),
   upload: ({ name, data }) => call(web.upload, name, new Uint8Array(data)),
-  render: ({ query, download }) => {
-    const r = call(web.render, query, !!download);
+  render: async ({ query, download }) => {
+    const r = await withLite(web.render, query, !!download);
     return { jpg: r.jpg, info: JSON.parse(r.info), name: r.name };
   },
 };

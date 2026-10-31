@@ -1,7 +1,9 @@
 """Entry points for worker.js: latent_app.Studio without the HTTP server, under Pyodide.
 
 The worker mounts the user's own kit read-only (AUTOEXEC.BIN, the .LTP packs and
-their GRAIN.LTG, plus any raws in the chosen folder) and keeps dropped raws in MEMFS.
+their GRAIN.LTG, or a LATENT_LITE folder, plus any raws in the chosen folder) and keeps
+dropped raws in MEMFS. Lite packs served over HTTP land in LITE file by file: when a call
+misses one it answers {"need": path} and the worker fetches it and calls again.
 Rendering is latent_app.Studio unchanged; only rawpy is the LibRaw-Wasm shim next to
 this file. Every call returns {"ok": value} or {"error": message}, as JS objects.
 """
@@ -14,6 +16,7 @@ from pyodide.ffi import to_js
 
 import latent_app
 
+LITE = "/lite/"     # worker.js
 studio = None
 
 
@@ -24,6 +27,8 @@ def _reply(fn):
             out = {"ok": value}
         except latent_app.BadRequest as e:
             out = {"error": str(e)}
+        except FileNotFoundError as e:
+            out = {"need": e.filename} if str(e.filename).startswith(LITE) else {"error": str(e)}
         except Exception as e:  # keep the worker up, report to the page
             out = {"error": "%s: %s" % (type(e).__name__, e)}
         return to_js(out, dict_converter=js.Object.fromEntries)

@@ -213,8 +213,8 @@
     <div class="kit" id="kit" hidden><div>
       <h2>Open your Ritual kit</h2>
       <p>Choose the folder that holds <code>AUTOEXEC.BIN</code> and the film packs: the <code>kit</code> folder
-        of the Ritual download, or the root of the camera's card (<code>AUTOEXEC.BIN</code> + <code>LATENT/</code>).
-        Raw files in that folder are listed too.</p>
+        of the Ritual download, or the root of the camera's card (<code>AUTOEXEC.BIN</code> + <code>LATENT/</code>),
+        or a <code>LATENT_LITE</code> folder. Raw files in that folder are listed too.</p>
       <p>Everything runs in this tab (Python via Pyodide, LibRaw via WebAssembly). Nothing is uploaded;
         the packs are read in place, only the parts a render needs.</p>
       <div class="btns">
@@ -360,6 +360,7 @@ function spawn(role) {
   const pending = new Map();
   let next = 0;
   w.onmessage = ({ data }) => {
+    if (data.status) { setStatus(data.status); return; }
     const p = pending.get(data.id); pending.delete(data.id);
     if (data.error !== undefined) p.reject(new Error(data.error)); else p.resolve(data.out);
   };
@@ -380,7 +381,7 @@ const wasm = {
     this.thumbs.clear();
     this.worker = spawn("render");
     this.traitsP = measureTraits(kit);
-    return this.worker.call("init", { kit, role: "render" });
+    return this.worker.call("init", { kit, liteUrl: hasLite ? LITE_URL : null, role: "render" });
   },
   files() { return this.worker.call("files"); },
   traits() { return this.traitsP; },
@@ -403,6 +404,10 @@ const wasm = {
 };
 
 let backend = http;
+
+// Lite packs (tools/latent_lite.py) at /lite/ of this server, or wherever ?lite=URL points.
+const LITE_URL = new URL((new URLSearchParams(location.search).get("lite") || "../lite").replace(/\/?$/, "/"), location.href).href;
+let hasLite = false;
 
 // Small key-value store for the kit folder handle and the measured film descriptions.
 const idb = {
@@ -429,7 +434,15 @@ const idb = {
 
 // The descriptions take a while to measure (latent_traits.py over every pack), so a second
 // worker does it, once per set of packs: the result is kept until a pack or the code changes.
+// Lite packs come with theirs.
 async function measureTraits(kit) {
+  if (!kit.some((k) => /\.LTP$/i.test(k.path))) {
+    const own = kit.find((k) => /(^|\/)traits\.json$/.test(k.path));
+    try {
+      const films = JSON.parse(own ? await own.file.text() : await (await fetch(LITE_URL + "traits.json")).text());
+      return { ready: true, films };
+    } catch (e) { return { ready: true, error: e.message }; }
+  }
   const src = await (await fetch("../tools/latent_traits.py")).text();
   const sig = kit.filter((k) => /\.LTP$/i.test(k.path)).map((k) => `${k.path} ${k.file.size} ${k.file.lastModified};`).join("");
   const hash = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(src + sig));
@@ -445,7 +458,7 @@ async function measureTraits(kit) {
 
 // ---------------------------------------------------------------- kit folder (browser build)
 
-const KIT_FILE = /(^|\/)(AUTOEXEC\.BIN|[^/]+\.LTP|GRAIN\.LTG|[^/]+\.CR2|[^/]+\.ARW)$/i;
+const KIT_FILE = /(^|\/)(AUTOEXEC\.BIN|[^/]+\.LTP|GRAIN\.LTG|[^/]+\.CR2|[^/]+\.ARW|firmware\.bin|film\.json|traits\.json|tables\.bin|curves\.bin|(paper|grain)\d+\.bin)$/i;
 
 async function walk(dir, prefix = "", depth = 0, out = []) {
   for await (const [name, h] of dir.entries()) {
@@ -510,8 +523,14 @@ async function startWasm() {
   backend = wasm;
   setStatus("choose a kit folder");
   const handle = await idb.get("kit-handle");
+  const granted = handle && handle.queryPermission && (await handle.queryPermission({ mode: "read" })) === "granted";
+  try {
+    hasLite = !!(await (await fetch(LITE_URL + "index.json", { cache: "no-cache" })).json()).files;
+  } catch (e) {}
+  // Lite packs on the server need no folder; the last one picked still gives its raws.
+  if (hasLite) return openKit(granted ? (await walk(handle)).filter((k) => /\.(cr2|arw)$/i.test(k.path)) : [], "lite packs");
   if (handle && handle.queryPermission) {
-    if ((await handle.queryPermission({ mode: "read" })) === "granted") {
+    if (granted) {
       kitPanel("Reading " + handle.name + "…");
       return openKit(await walk(handle), handle.name);
     }

@@ -213,11 +213,21 @@ def light_steps(mireds, m):
 # ---------------------------------------------------------------- film pack
 
 def load_cube16(pack, idx):
+    if hasattr(pack, "cube16"):     # latent_lite.LitePack
+        return pack.cube16(idx)
     n, words = pack.cube(idx)
     w = np.array(words, dtype=np.uint32)
     r, g, b = w & 0x7FF, (w >> 11) & 0x7FF, w >> 22
     c = np.stack([(r << 5) | (r >> 6), (g << 5) | (g >> 6), (b << 6) | (b >> 4)], axis=-1)
     return c.reshape(n, n, n, 3).astype(np.float32)   # [b][g][r][channel], 0..65535
+
+
+def load_grain(pack, latent_dir, key, paper_i, push_i, level):
+    if hasattr(pack, "grain_block"):    # latent_lite.LitePack
+        blk = pack.grain_block(paper_i, push_i)
+    else:
+        blk = latent_effects.read_grain_block(os.path.join(latent_dir, pack.code, "GRAIN.LTG"), key, paper_i, push_i)
+    return latent_effects.Grain(blk, level)
 
 
 def select_cubes(pack, paper_i, push_stops, grade, mired):
@@ -403,8 +413,7 @@ def main():
     grain, noise, card_path = None, None, None
     if not a.no_grain:
         # The grain block uses the selected paper and push, before the B&W cube remap.
-        grain = latent_effects.Grain(os.path.join(a.latent_dir, pack.code, "GRAIN.LTG"), key,
-                                     a.paper, pack.push.index(a.push), a.grade)
+        grain = load_grain(pack, a.latent_dir, key, a.paper, pack.push.index(a.push), a.grade)
         card_path = a.card_path or "A:/DCIM/%s/" % src["card_dir"] + os.path.basename(a.raw).upper()
         noise = latent_effects.grain_noise(payload, latent_effects.fnv1a_seed(card_path),
                                            height, width, grain.streams())

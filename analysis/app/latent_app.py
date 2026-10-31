@@ -19,6 +19,7 @@ Film descriptions (latent_traits.py) are measured in the background at start-up
 and kept in a JSON file in the system temp folder until a pack changes.
 The server only needs the standard library on top of the CLI's dependencies.
 The same page also runs without Python, entirely in the browser: see web/README.md.
+Lite packs work here too: --latent-dir LATENT_LITE --autoexec LATENT_LITE/firmware.bin.
 
 AUTOEXEC.BIN and LATENT/ hold Latent Studios' key and film packs: keep the
 server on localhost or behind your own access control, do not host it publicly.
@@ -51,6 +52,7 @@ import latent_color  # noqa: E402
 import latent_crypt  # noqa: E402
 import latent_develop as ld  # noqa: E402
 import latent_effects  # noqa: E402
+import latent_lite  # noqa: E402
 import latent_ltp  # noqa: E402
 import latent_traits  # noqa: E402
 
@@ -112,6 +114,9 @@ class Studio:
                 pack = latent_ltp.LTPack(os.path.join(latent_dir, f), self.key)
                 if pack.index_checksum_ok:
                     self.packs[pack.code] = pack
+        for f in sorted(os.listdir(latent_dir)):    # a lite pack only stands in when the .LTP is absent
+            if f not in self.packs and os.path.isfile(os.path.join(latent_dir, f, latent_lite.INDEX)):
+                self.packs[f] = latent_lite.LitePack(os.path.join(latent_dir, f))
         self.tables = LRU(len(self.packs))
         self.raws = LRU(3)
         self.cubes = LRU(24)
@@ -332,8 +337,7 @@ class Studio:
                 push_i = pack.push.index(p["push"])
                 grain = self.grains.get(
                     (pack.code, p["paper"], push_i, p["grade"]),
-                    lambda: latent_effects.Grain(os.path.join(self.latent_dir, pack.code, "GRAIN.LTG"),
-                                                 self.key, p["paper"], push_i, p["grade"]))
+                    lambda: ld.load_grain(pack, self.latent_dir, self.key, p["paper"], push_i, p["grade"]))
                 card_path = p["card_path"] or "A:/DCIM/%s/" % src["card_dir"] + os.path.basename(path).upper()
                 seed = latent_effects.fnv1a_seed(card_path)
                 noise = self.noise.get(
