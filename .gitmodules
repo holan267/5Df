@@ -1,0 +1,3 @@
+[submodule "analysis/engine/third_party/LibRaw"]
+	path = analysis/engine/third_party/LibRaw
+	url = https://github.com/LibRaw/LibRaw.git
