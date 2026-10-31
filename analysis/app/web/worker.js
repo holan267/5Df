@@ -110,20 +110,40 @@ async function mountLite(base) {
 
 function liteUrl(path) { return `${lite.base}${path}?v=${lite.files[path][1]}`; }
 
+const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, n) => {
+  for (let k = 0; k < 8; k++) n = n & 1 ? 0xEDB88320 ^ (n >>> 1) : n >>> 1;
+  return n;
+});
+
+// As index.json has it: zlib.crc32 in 8 hex digits.
+function crc32(bytes) {
+  let c = -1;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 255] ^ (c >>> 8);
+  return (~c >>> 0).toString(16).padStart(8, "0");
+}
+
+// Static hosts and dev servers tend to answer a missing path with index.html and a 200, so
+// nothing is used or cached until it matches index.json; a bad cache entry goes away here.
 async function fetchLite(path) {
   if (!lite.files[path]) throw new Error(`${path} is not in ${lite.base}index.json`);
   const url = liteUrl(path);
-  let r = lite.cache && await lite.cache.match(url);
-  if (!r) {
-    const size = lite.files[path][0];
+  const [size, crc] = lite.files[path];
+  const hit = lite.cache && await lite.cache.match(url);
+  let data = hit && new Uint8Array(await hit.arrayBuffer());
+  if (data && crc32(data) !== crc) { await lite.cache.delete(url); data = null; }
+  if (!data) {
     if (size > 1 << 20) self.postMessage({ status: `downloading ${path} (${(size / 1e6).toFixed(1)} MB)…` });
-    r = await fetch(url);
+    const r = await fetch(url, { cache: "no-cache" });
     if (!r.ok) throw new Error(`${url}: ${r.status}`);
-    if (lite.cache) await lite.cache.put(url, r.clone()).catch(() => {});   // out of quota: it still works this once
+    data = new Uint8Array(await r.arrayBuffer());
+    if (crc32(data) !== crc) {
+      throw new Error(`${url}: the server's file is damaged or missing (${data.length} bytes of ${r.headers.get("content-type")}, index.json says ${size})`);
+    }
+    if (lite.cache) await lite.cache.put(url, new Response(data)).catch(() => {});   // out of quota: it still works this once
   }
   const file = `${LITE}/${path}`;
   py.FS.mkdirTree(file.slice(0, file.lastIndexOf("/")));
-  py.FS.writeFile(file, new Uint8Array(await r.arrayBuffer()));
+  py.FS.writeFile(file, data);
   return file;
 }
 

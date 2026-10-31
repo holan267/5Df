@@ -6,9 +6,10 @@ size attributes open_raw() reads for cameras other than the 5D.
 
 worker.js registers the decoder as the JS module _libraw; its calls are synchronous
 inside the worker. The wrapper does not expose LibRaw's per-channel black (cblack) or
-linear_max, so they are read here the way LibRaw reads them: for Sony from the encrypted
-SR2 block (tags 0x7310, 0x787f), for Canon from SpecularWhiteLevel. Other makes get the
-common black and no per-channel white (open_raw() then uses white_level).
+linear_max, and its common black is 0 on Canon raws, so they are read here the way LibRaw
+reads them: for Sony from the encrypted SR2 block (tags 0x7310, 0x787f), for Canon from
+ChannelBlackLevel and SpecularWhiteLevel. Other makes get the common black and no
+per-channel white (open_raw() then uses white_level).
 """
 import collections
 import enum
@@ -215,7 +216,10 @@ class RawPy:
         bl = self.sr2.get(0x7310)
         if bl and len(bl) == 4:
             return [bl[0], bl[1], bl[3], bl[2]]
-        return [int(self.meta["color_data"]["black"])] * 4
+        canon = self.meta.get("canon") or {}
+        if any(canon.get("ChannelBlackLevel") or ()):
+            return list(canon["ChannelBlackLevel"])
+        return [int(canon.get("AverageBlackLevel") or self.meta["color_data"]["black"])] * 4
 
     @property
     def camera_white_level_per_channel(self):
@@ -248,5 +252,7 @@ class RawPy:
         c = crops[0] if crops and crops[0]["cwidth"] else {"cleft": 0, "ctop": 0, "cwidth": 0, "cheight": 0}
         # The wrapper swaps width / height for rotated shots; rawpy reports the sensor's.
         w, h = (m["height"], m["width"]) if m["flip"] in (5, 6, 7) else (m["width"], m["height"])
+        # A size without a position (DSLR-A350 ARW) has 65535 for the margins; rawpy reports 0.
+        cleft, ctop = (0 if v == 0xFFFF else v for v in (c["cleft"], c["ctop"]))
         return ImageSizes(m["raw_height"], m["raw_width"], h, w, m["top_margin"], m["left_margin"], h, w,
-                          m["flip"], c["cleft"], c["ctop"], c["cwidth"], c["cheight"])
+                          m["flip"], cleft, ctop, c["cwidth"], c["cheight"])

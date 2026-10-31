@@ -38,6 +38,7 @@ Khi trang được `latent_app.py` phục vụ (`uv run analysis/app/latent_app.
 - Lúc khởi động trang chỉ tải `firmware.bin` và 20 `film.json`, tổng khoảng 460 KB. Từng `paper<i>.bin`, `grain<i>.bin`, `tables.bin`, `curves.bin` chỉ được tải khi một lần render cần đến: Python báo thiếu file, worker tải về rồi gọi lại (`withLite` trong `worker.js`).
 - Một paper tải 0,4–8 MB. Thanh trạng thái hiện `downloading …` với file trên 1 MB. Cả bộ 533 MB chỉ tải hết nếu dùng hết mọi paper.
 - File đã tải nằm trong Cache Storage, nên lần sau không tải lại. URL có `?v=<crc>`, nên khi build lại, file cũ tự bị bỏ. Cache không mở được thì trang vẫn chạy, chỉ là tải lại mỗi lần.
+- Mọi file đều được so với CRC trong `index.json` trước khi dùng hoặc lưu cache. Host tĩnh và dev server thường trả `index.html` kèm mã 200 cho đường dẫn không có; khi đó trang báo file nào hỏng, thay vì `Error -3 ... incorrect header check` từ zlib. File hỏng đã nằm trong cache từ trước sẽ tự bị xóa và tải lại.
 - Để lấy pack từ host khác: `?lite=https://host/duong-dan/`. Host đó phải gửi `Access-Control-Allow-Origin` cho trang.
 - Trong Windows, profile Chrome nằm quá sâu có thể làm Cache Storage hỏng do giới hạn độ dài đường dẫn. Khi đó trang rơi vào trường hợp không có cache nói trên.
 
@@ -63,7 +64,7 @@ Khi trang được `latent_app.py` phục vụ (`uv run analysis/app/latent_app.
 | Ảnh đã tráng, trước JPEG (P400, V050, HP5P B&W, ARW) | 2 đến 1.990 giá trị lệch ±1 trên 2,4–9,5 triệu (làm tròn float32) |
 | File JPEG | Khác byte. Pillow trong Pyodide dùng libjpeg 9 (IJG), không phải libjpeg-turbo, nên giảm mẫu kênh màu khác: trung bình lệch khoảng 2 mức trên các pixel khác nhau, tối đa khoảng 25 ở vùng grain dày |
 
-Wrapper của LibRaw‑Wasm không xuất `cblack` và `linear_max`. `rawpy.py` đọc lại hai giá trị này theo đúng cách LibRaw làm: với Sony, giải mã khối SR2 (tag `0x7310` và `0x787f`); với Canon, lấy `SpecularWhiteLevel`. Các hãng khác dùng black chung và `white_level`, nên có thể lệch rawpy nếu máy đó có level riêng theo kênh.
+Wrapper của LibRaw‑Wasm không xuất `cblack` và `linear_max`, và `black` chung của nó bằng 0 với file Canon. `rawpy.py` đọc lại các giá trị này theo đúng cách LibRaw làm: với Sony, giải mã khối SR2 (tag `0x7310` và `0x787f`); với Canon, lấy `ChannelBlackLevel` và `SpecularWhiteLevel`. Các hãng khác dùng black chung và `white_level`, nên có thể lệch rawpy nếu máy đó có level riêng theo kênh.
 
 ## Tốc độ (Chrome, cùng máy)
 

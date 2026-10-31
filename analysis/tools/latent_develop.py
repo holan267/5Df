@@ -162,8 +162,9 @@ def open_raw(path, autoexec, matrix="adobe", exposure=0.0):
             cwb = raw.camera_whitebalance
             wb = (cwb[0], cwb[1], cwb[2]) if cwb[0] > 0 and cwb[2] > 0 else tuple(raw.daylight_whitebalance[:3])
             # LibRaw's crop is relative to the full sensor, postprocess() returns the visible area.
+            # A crop without a position reads as margin 0, which would land before that area.
             s = raw.sizes
-            crop = ((s.crop_left_margin - s.left_margin, s.crop_top_margin - s.top_margin,
+            crop = ((max(s.crop_left_margin - s.left_margin, 0), max(s.crop_top_margin - s.top_margin, 0),
                      s.crop_width, s.crop_height)
                     if s.crop_width else (0, 0, s.width, s.height))
         meta["wb"] = (wb[0], wb[1], wb[1], wb[2])
